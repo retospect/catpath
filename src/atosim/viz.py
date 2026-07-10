@@ -61,7 +61,8 @@ def _hump(x0, y0, x1, y1, y_peak, n=40):
 
 
 def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
-                 meta: dict | None = None) -> None:
+                 caption: str | None = None, show_caption: bool = True,
+                 png_meta: dict | None = None) -> None:
     """Reaction-coordinate energy diagram.
 
     Each species is a bold horizontal level line labelled with its name; each
@@ -70,9 +71,10 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
     connectors.  Every root->leaf pathway is drawn as its own coloured profile,
     so competing pathways are overlaid on one plot.
 
-    Uncertainty (``meta`` optional): level energies and barriers are shown with a
-    +/- 1 s.d. band computed across seeds; ``meta`` (backend/model/method/seeds)
-    is printed as a provenance footer so the plot states which tools produced it.
+    Uncertainty: level energies and barriers carry a +/- 1 s.d. band across
+    samples (seeds x models).  ``caption`` (when ``show_caption``) is printed as a
+    visible provenance footer; ``png_meta`` is embedded as PNG tEXt chunks so the
+    provenance travels with the pixels even on the caption-less image.
     """
     roots = [n for n, d in g.in_degree() if d == 0] or [next(iter(g.nodes))]
     leaves = [n for n, d in g.out_degree() if d == 0]
@@ -132,21 +134,15 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
     ax.legend(fontsize=7, loc="best", framealpha=0.9)
     ax.margins(x=0.05, y=0.15)
 
-    if meta:
-        model = f"{meta.get('backend', '?')}" + (
-            f" ({meta['model']})" if meta.get("model") else "")
-        seeds = meta.get("seeds", [])
-        foot = (f"potential: {model}  |  device: {meta.get('device', '?')}  |  "
-                f"relax: BFGS  |  TS search: CI-NEB "
-                f"({meta.get('neb_images', '?')} images)  |  "
-                f"{len(seeds)} seeds {list(seeds)}  |  "
-                f"shaded band / Ea± = 1 s.d. across seeds")
-        fig.text(0.5, 0.005, foot, ha="center", va="bottom", fontsize=7,
+    visible = bool(caption) and show_caption
+    if visible:
+        fig.text(0.5, 0.005, caption, ha="center", va="bottom", fontsize=7,
                  color="#555555")
         fig.subplots_adjust(bottom=0.12)
 
-    fig.tight_layout(rect=(0, 0.03, 1, 1) if meta else None)
-    fig.savefig(path, dpi=150)
+    fig.tight_layout(rect=(0, 0.03, 1, 1) if visible else None)
+    # PNG tEXt metadata travels with the pixels even on the caption-less image
+    fig.savefig(path, dpi=150, metadata=png_meta or None)
     plt.close(fig)
 
 

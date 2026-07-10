@@ -15,6 +15,7 @@ calculator, so the same code runs on EMT (dev) or MACE/fairchem (production).
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from .calculators import check_supported, make_calculator
 from .config import Config
 from .graph import build_graph, to_csv, to_json
 from .network import Network, StateSpec, build_network
+from . import provenance
 from .neb import neb_barrier
 from .relax import pre_relax, relax
 from .structures import rattle_adsorbate, symbols_of
@@ -43,6 +45,7 @@ class Results:
     edges: list[dict] = field(default_factory=list)
     pathway: list[str] = field(default_factory=list)
     links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
+    models: list[str] = field(default_factory=list)  # distinct model tags used
     warnings: list[str] = field(default_factory=list)
 
 
@@ -106,23 +109,33 @@ def run_one_seed(cfg: Config, seed: int, log=print) -> dict:
 
 
 def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
-    """Combine per-seed partials into mean +/- spread Estimates."""
+    """Combine partials (over seeds and/or models) into mean +/- spread.
+
+    Each partial is referenced to the substrate (root) state *before* pooling, so
+    energies from different models -- which have different absolute offsets -- are
+    combined on a common relative scale.  The resulting spread therefore captures
+    both seed and model uncertainty.
+    """
     net = build_network(cfg.slab, cfg.network)
-    results = Results(pathway=net.order())
-    results.links = list(net.links)
+    order = net.order()
+    ref_state = order[0]
+    results = Results(pathway=order, links=list(net.links))
 
     state_vals: dict[str, list[float]] = {}
     step_bar: dict[str, list[float]] = {}
     step_de: dict[str, list[float]] = {}
     step_meta: dict[str, tuple[str, str]] = {}
+    models: set[str] = set()
 
     for p in partials:
+        models.add(p.get("model", cfg.mlip.backend))
         results.warnings.extend(p.get("warnings", []))
+        ref = p["states"].get(ref_state)  # per-partial reference removes offset
         for name, e in p["states"].items():
-            state_vals.setdefault(name, []).append(e)
+            state_vals.setdefault(name, []).append(e - ref if ref is not None else e)
         for sname, s in p["steps"].items():
             step_meta[sname] = (s["reactant"], s["product"])
-            if s["barrier"] is not None:
+            if s["barrier"] is not None:  # barriers are already relative
                 step_bar.setdefault(sname, []).append(s["barrier"])
             if s["delta_e"] is not None:
                 step_de.setdefault(sname, []).append(s["delta_e"])
@@ -135,12 +148,26 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
             "barrier": aggregate(step_bar.get(sname, []), cfg.search.energy_thresh),
             "delta_e": aggregate(step_de.get(sname, []), cfg.search.energy_thresh),
         })
+    results.models = sorted(models)
     return results
 
 
 def run(cfg: Config, log=print) -> Results:
-    """Convenience: run all seeds in-process and aggregate."""
-    partials = [run_one_seed(cfg, seed, log=log) for seed in cfg.search.seeds]
+    """Run every (model x seed) combination in-process and aggregate.
+
+    Model uncertainty (from ``mlip.models``) and seed uncertainty are pooled into
+    one mean +/- spread per level and barrier.
+    """
+    partials: list[dict] = []
+    for backend, model in cfg.mlip.specs():
+        tag = f"{backend}:{model}" if model else backend
+        c = copy.deepcopy(cfg)
+        c.mlip.backend, c.mlip.model, c.mlip.models = backend, model, []
+        for seed in cfg.search.seeds:
+            log(f"=== model={tag} seed={seed} ===")
+            p = run_one_seed(c, seed, log=log)
+            p["model"] = tag
+            partials.append(p)
     return aggregate_partials(cfg, partials)
 
 
@@ -163,11 +190,16 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
     to_json(g, outdir / "graph.json")
     to_csv(g, outdir / "nodes.csv", outdir / "edges.csv")
     title = f"{cfg.substrate} -> {cfg.target} on {cfg.slab.element}"
-    meta = {"backend": cfg.mlip.backend, "model": cfg.mlip.model,
-            "device": cfg.mlip.device, "seeds": cfg.search.seeds,
-            "neb_images": cfg.search.neb_images}
-    draw_profile(g, outdir / "graph.png", title=title, meta=meta)  # energy profile
+    cap = provenance.caption(cfg, results)
+    pmeta = provenance.png_metadata(cfg, results)
+    # two versions: clean (no visible text) and annotated (visible footer).
+    # Both embed the provenance as PNG tEXt so it travels with the pixels.
+    draw_profile(g, outdir / "graph.png", title=title, caption=cap,
+                 show_caption=False, png_meta=pmeta)
+    draw_profile(g, outdir / "graph_annotated.png", title=title, caption=cap,
+                 show_caption=True, png_meta=pmeta)
     draw_graph(g, outdir / "graph_network.png", title=title)       # node/DAG view
+    (outdir / "methods.md").write_text(provenance.methods_text(cfg, results))
 
     # substrate x intermediate energy map (one row per substrate; here 1 substrate)
     cols = results.pathway
@@ -180,7 +212,10 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
     summary = {
         "name": cfg.name,
         "substrate": cfg.substrate, "target": cfg.target,
-        "backend": cfg.mlip.backend, "seeds": cfg.search.seeds,
+        "backend": cfg.mlip.backend, "models": results.models,
+        "seeds": cfg.search.seeds,
+        "n_samples": max(1, len(results.models)) * len(cfg.search.seeds),
+        "energy_reference": f"relative to substrate state '{results.pathway[0]}'",
         "pathway": results.pathway,
         "nodes": {k: v.as_dict() for k, v in results.node_energies.items()},
         "edges": [

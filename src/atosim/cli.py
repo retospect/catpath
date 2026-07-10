@@ -26,6 +26,8 @@ def _load(args) -> Config:
     cfg = Config.from_yaml(args.config) if args.config else Config()
     if getattr(args, "backend", None):
         cfg.mlip.backend = args.backend
+    if getattr(args, "models", None):
+        cfg.mlip.models = [m.strip() for m in args.models.split(",")]
     if getattr(args, "seeds", None):
         cfg.search.seeds = [int(s) for s in args.seeds.split(",")]
     if getattr(args, "name", None):
@@ -47,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("config", nargs="?", help="run config YAML")
     common.add_argument("--backend", help="override MLIP backend (emt|mace|fairchem)")
+    common.add_argument("--models", help="multi-model: comma-separated, e.g. small,medium "
+                                         "or mace:small,mace:medium")
     common.add_argument("--seeds", help="override seeds, comma-separated")
     common.add_argument("--name", help="override run name")
     common.add_argument("--outdir", help="override output directory")

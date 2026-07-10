@@ -1,0 +1,29 @@
+# NO -> NH3 on Pd(111) with TWO ML potentials x TWO seeds = 4 samples/datapoint.
+# Error bars combine seed variance (stochastic) and model variance (systematic).
+name: nh3_multimodel
+substrate: "NO"
+target: "NH3"
+network: ammonia
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: mace
+  models: ["small", "medium"]   # two MACE-MP-0 foundation models
+  device: cuda
+
+search:
+  neb_images: 5        # moderate NEB (uncertainty comes from model x seed spread)
+  fmax: 0.05
+  max_steps: 200
+  neb_fmax: 0.1
+  neb_max_steps: 100
+  seeds: [0, 1]        # 2 seeds x 2 models = 4 samples
+  rmsd_thresh: 0.7
+  energy_thresh: 0.05
+
+outdir: runs

@@ -49,7 +49,21 @@ class SlabConfig:
 class MLIPConfig:
     backend: str = "emt"  # emt | mace | fairchem
     model: str | None = None  # checkpoint name/path for mace/fairchem
+    models: list[str] = field(default_factory=list)  # multi-model: each "model" or "backend:model"
     device: str = "cpu"
+
+    def specs(self) -> list[tuple[str, str | None]]:
+        """(backend, model) pairs to run. Multi-model when ``models`` is set."""
+        if self.models:
+            out: list[tuple[str, str | None]] = []
+            for m in self.models:
+                if ":" in m:
+                    b, mm = m.split(":", 1)
+                    out.append((b, mm or None))
+                else:
+                    out.append((self.backend, m))
+            return out
+        return [(self.backend, self.model)]
 
 
 @dataclass
