@@ -60,7 +60,8 @@ def _hump(x0, y0, x1, y1, y_peak, n=40):
     return np.concatenate([xa, xb]), np.concatenate([ya, yb])
 
 
-def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") -> None:
+def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
+                 meta: dict | None = None) -> None:
     """Reaction-coordinate energy diagram.
 
     Each species is a bold horizontal level line labelled with its name; each
@@ -68,6 +69,10 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") ->
     the reactant equals the barrier; barrierless "supply" steps are dashed
     connectors.  Every root->leaf pathway is drawn as its own coloured profile,
     so competing pathways are overlaid on one plot.
+
+    Uncertainty (``meta`` optional): level energies and barriers are shown with a
+    +/- 1 s.d. band computed across seeds; ``meta`` (backend/model/method/seeds)
+    is printed as a provenance footer so the plot states which tools produced it.
     """
     roots = [n for n, d in g.in_degree() if d == 0] or [next(iter(g.nodes))]
     leaves = [n for n, d in g.out_degree() if d == 0]
@@ -86,11 +91,16 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") ->
     for pi, nodes in enumerate(paths):
         color = cmap(pi % 10)
         ys = [g.nodes[n]["rel_energy"] for n in nodes]
-        for i, (n, y) in enumerate(zip(nodes, ys)):
+        es = [g.nodes[n].get("energy_std", 0.0) for n in nodes]
+        for i, (n, y, sd) in enumerate(zip(nodes, ys, es)):
             ax.hlines(y, i - half, i + half, color=color, lw=4, zorder=3)
+            if sd > 1e-6:  # +/- 1 s.d. band across seeds
+                ax.fill_between([i - half, i + half], [y - sd] * 2, [y + sd] * 2,
+                                color=color, alpha=0.18, lw=0, zorder=1)
             if (i, n) not in labeled:  # label each level once per x position
-                ax.text(i, y + 0.02, n, ha="center", va="bottom",
-                        fontsize=9, fontweight="bold", color=color, zorder=4)
+                lab = f"{n}" if sd <= 1e-6 else f"{n}\n({y:+.2f}±{sd:.2f})"
+                ax.text(i, y + sd + 0.03, lab, ha="center", va="bottom",
+                        fontsize=8, fontweight="bold", color=color, zorder=4)
                 labeled.add((i, n))
         for i in range(len(nodes) - 1):
             u, v = nodes[i], nodes[i + 1]
@@ -103,9 +113,15 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") ->
                 peak = y0 + max(d["barrier"], 0.0)
                 xs, yc = _hump(i + half, y0, i + 1 - half, y1, peak)
                 ax.plot(xs, yc, color=color, lw=2, zorder=2)
+                bsd = d.get("barrier_std", 0.0)
+                if bsd > 1e-6:  # barrier uncertainty as a cap at the TS
+                    ax.errorbar((2 * i + 1) / 2, peak, yerr=bsd, color=color,
+                                capsize=3, elinewidth=1, zorder=2)
                 if d["barrier"] > 1e-3:
-                    ax.annotate(f"Ea={d['barrier']:.2f}", xy=((2 * i + 1) / 2, peak),
-                                xytext=(0, 4), textcoords="offset points",
+                    lab = (f"Ea={d['barrier']:.2f}" if bsd <= 1e-6
+                           else f"Ea={d['barrier']:.2f}±{bsd:.2f}")
+                    ax.annotate(lab, xy=((2 * i + 1) / 2, peak + bsd),
+                                xytext=(0, 5), textcoords="offset points",
                                 ha="center", fontsize=7, color=color)
         ax.plot([], [], color=color, lw=3, label=" -> ".join(nodes))
 
@@ -115,7 +131,21 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") ->
     ax.set_xticks([])
     ax.legend(fontsize=7, loc="best", framealpha=0.9)
     ax.margins(x=0.05, y=0.15)
-    fig.tight_layout()
+
+    if meta:
+        model = f"{meta.get('backend', '?')}" + (
+            f" ({meta['model']})" if meta.get("model") else "")
+        seeds = meta.get("seeds", [])
+        foot = (f"potential: {model}  |  device: {meta.get('device', '?')}  |  "
+                f"relax: BFGS  |  TS search: CI-NEB "
+                f"({meta.get('neb_images', '?')} images)  |  "
+                f"{len(seeds)} seeds {list(seeds)}  |  "
+                f"shaded band / Ea± = 1 s.d. across seeds")
+        fig.text(0.5, 0.005, foot, ha="center", va="bottom", fontsize=7,
+                 color="#555555")
+        fig.subplots_adjust(bottom=0.12)
+
+    fig.tight_layout(rect=(0, 0.03, 1, 1) if meta else None)
     fig.savefig(path, dpi=150)
     plt.close(fig)
 

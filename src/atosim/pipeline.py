@@ -163,8 +163,11 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
     to_json(g, outdir / "graph.json")
     to_csv(g, outdir / "nodes.csv", outdir / "edges.csv")
     title = f"{cfg.substrate} -> {cfg.target} on {cfg.slab.element}"
-    draw_profile(g, outdir / "graph.png", title=title)          # energy profile
-    draw_graph(g, outdir / "graph_network.png", title=title)    # node/DAG view
+    meta = {"backend": cfg.mlip.backend, "model": cfg.mlip.model,
+            "device": cfg.mlip.device, "seeds": cfg.search.seeds,
+            "neb_images": cfg.search.neb_images}
+    draw_profile(g, outdir / "graph.png", title=title, meta=meta)  # energy profile
+    draw_graph(g, outdir / "graph_network.png", title=title)       # node/DAG view
 
     # substrate x intermediate energy map (one row per substrate; here 1 substrate)
     cols = results.pathway
