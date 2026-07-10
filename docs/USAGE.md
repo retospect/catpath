@@ -37,8 +37,10 @@ search:
 atosim run <cfg>                        # all seeds in-process + outputs
 atosim seed <cfg> --seed 0 --out p0.json # one seed → partial JSON (fan-out unit)
 atosim aggregate <cfg> --partials p*.json # combine partials → outputs
+atosim sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces → multi-row map
+atosim multi <cfg>                       # several substrates (config `substrates:`) → union map
 atosim <cfg>                            # shorthand for `run`
-# overrides: --backend --seeds 0,1,2 --name --outdir
+# overrides: --backend --models --seeds 0,1,2 --reagents H,O --name --outdir
 ```
 
 ## Snakemake

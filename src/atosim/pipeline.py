@@ -74,7 +74,7 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
     for each state is stored in it (for structure thumbnails). Kept out of the
     JSON partial since ``Atoms`` are not serialisable.
     """
-    net = build_network(cfg.slab, cfg.network)
+    net = build_network(cfg.slab, cfg.network, cfg.reagents)
     slab = net.slab()
     n_slab = slab.info["n_slab"]
 
@@ -132,7 +132,7 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
     combined on a common relative scale.  The resulting spread therefore captures
     both seed and model uncertainty.
     """
-    net = build_network(cfg.slab, cfg.network)
+    net = build_network(cfg.slab, cfg.network, cfg.reagents)
     order = net.order()
     ref_state = order[0]
     results = Results(pathway=order, links=list(net.links))

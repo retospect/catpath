@@ -9,12 +9,14 @@ priority-ordered within sections.
   **with- and without-thumbnail** variants. Dual top+side, fixed camera/zoom.
 
 ## Next up (agreed order: a → c → b)
-- [ ] **(c) Reagent list config knob** — let a config say `reagents: [H, O]` and
-  auto-insert the hydrogenation/oxidation supply steps, instead of baking
-  reagents into each network template.
-- [ ] **(c) Multi-substrate networks** — run several substrates (each its own
-  network) in one job → true multi-row energy map (today `substrates:` is only a
-  label; `sweep` varies the metal, not the molecule).
+- [x] **(c) Reagent list config knob** — `reagents: [H, O]` filters the network to
+  branches reachable with the allowed adatoms (reagent per supply link derived
+  from stoichiometry). `[]` = dissociation only; omit = full template. CLI:
+  `--reagents H,O`. Tests in `test_network.py`.
+- [x] **(c) Multi-substrate networks** — `atosim multi` runs several
+  `(substrate, target, network, reagents)` specs from `substrates:` and stacks
+  them into one union-column energy map (NaN where a state is absent). See
+  `multi.py`, `examples/multi_substrate.yaml`, `test_multi.py`.
 - [ ] **(b) Intermediate autodetection** — the big one. Rule-guided explorer:
   apply reaction templates / graph-rewrite rules to generate intermediates,
   prune (valence/charge/reactive-distance/rough-energy), expand around best

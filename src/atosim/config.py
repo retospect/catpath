@@ -83,12 +83,30 @@ class SearchConfig:
 
 
 @dataclass
+class SubstrateSpec:
+    """One (substrate -> target) network to run in a multi-substrate job."""
+
+    substrate: str
+    target: str = ""
+    network: str = "ammonia"
+    reagents: list[str] | None = None
+    name: str = ""  # optional row label / run-folder suffix
+
+    def __post_init__(self) -> None:
+        self.substrate = str(self.substrate)
+        self.target = str(self.target) if self.target else self.substrate
+
+
+@dataclass
 class Config:
     name: str = "run"
     substrate: str = "NO"  # starting adsorbate label
     target: str = "NH3"  # ending adsorbate label
     network: str = "ammonia"  # ammonia | branching | oxidation
-    substrates: list[str] = field(default_factory=list)  # rows of the energy map
+    # which reagent adatoms are available (filters the network branches);
+    # None = use the full template (back-compat), [] = reagent-free steps only.
+    reagents: list[str] | None = None
+    substrates: list = field(default_factory=list)  # rows: labels or SubstrateSpec dicts
     slab: SlabConfig = field(default_factory=SlabConfig)
     mlip: MLIPConfig = field(default_factory=MLIPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
@@ -99,9 +117,34 @@ class Config:
         # guard against YAML bool coercion / numeric labels leaking through
         self.substrate = str(self.substrate)
         self.target = str(self.target)
-        self.substrates = [str(s) for s in self.substrates]
+        if self.reagents is not None:
+            self.reagents = [str(r) for r in self.reagents]
+        # substrate entries are either bare labels (str) or full spec dicts
+        self.substrates = [s if isinstance(s, dict) else str(s)
+                           for s in self.substrates]
         if not self.substrates:
             self.substrates = [self.substrate]
+
+    def substrate_runs(self) -> list["SubstrateSpec"]:
+        """Normalise ``substrates`` into explicit (substrate, target, network) specs.
+
+        A bare-string entry inherits this config's target/network/reagents; a dict
+        entry overrides them per-substrate.  A single-entry result is just the
+        ordinary single-substrate run.
+        """
+        specs: list[SubstrateSpec] = []
+        for s in self.substrates:
+            if isinstance(s, dict):
+                d = dict(s)
+                d.setdefault("target", self.target)
+                d.setdefault("network", self.network)
+                d.setdefault("reagents", self.reagents)
+                specs.append(SubstrateSpec(**d))
+            else:
+                specs.append(SubstrateSpec(substrate=s, target=self.target,
+                                           network=self.network,
+                                           reagents=self.reagents))
+        return specs
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Config":

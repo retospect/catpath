@@ -1,0 +1,20 @@
+# NO on Pd, but restrict the chemistry to hydrogenation only (reagent = H*).
+# The ammonia template's O-branch (water byproduct) and any oxidation are pruned
+# because no O* reagent is available; dissociation + N-hydrogenation remain.
+name: no_reduction_only
+substrate: "NO"
+target: "NH3"
+network: ammonia
+reagents: ["H"]        # only H* adatoms available (omit for the full template; [] = dissociation only)
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: emt          # swap to mace + models:[...] for production
+
+search:
+  seeds: [0, 1, 2]

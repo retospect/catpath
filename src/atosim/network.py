@@ -20,6 +20,7 @@ just more ``StepSpec``/link entries.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 import networkx as nx
@@ -39,6 +40,13 @@ class StateSpec:
 
     def build(self, slab: Atoms) -> Atoms:
         return place_fragments(slab, self.specs)
+
+    def adsorbate_counts(self) -> Counter:
+        """Element -> count of adsorbate atoms (cheap; no slab build)."""
+        c: Counter = Counter()
+        for s in self.specs:
+            c[s["symbol"]] += 1
+        return c
 
 
 @dataclass
@@ -300,7 +308,57 @@ def build_ammonia_network(slab_cfg: SlabConfig) -> Network:
     )
 
 
-def build_network(slab_cfg: SlabConfig, kind: str = "ammonia") -> Network:
+def _added_elements(reactant: StateSpec, product: StateSpec) -> set[str]:
+    """Elements that INCREASE from reactant to product -> the reagent(s) supplied.
+
+    Uses Counter subtraction, which keeps only positive differences, so an atom
+    that leaves to a reservoir (e.g. the O in ``N+O -> N+H``) is not mistaken for
+    a reagent -- only the *added* species (here H) count.
+    """
+    diff = product.adsorbate_counts() - reactant.adsorbate_counts()
+    return set(diff)
+
+
+def filter_by_reagents(net: Network, reagents: list[str]) -> Network:
+    """Keep only the part of ``net`` reachable using the allowed reagent adatoms.
+
+    A **supply link** ``a -> b`` requires whatever element it adds (derived from
+    the stoichiometry, not hardcoded); it is dropped if that element is not in
+    ``reagents``.  **Reaction** steps are atom-conserving (no reagent).  After
+    pruning links, any state no longer reachable from the substrate (root) -- and
+    every step/link touching it -- is removed.  So ``reagents=[]`` collapses the
+    network to the reagent-free steps (e.g. dissociation / site isomers) only.
+    """
+    allowed = set(reagents)
+    states = net.states()
+
+    kept_links = [(a, b) for a, b in net.links
+                  if _added_elements(states[a], states[b]) <= allowed]
+
+    adj: dict[str, set[str]] = {}
+    for s in net.steps:
+        adj.setdefault(s.reactant.name, set()).add(s.product.name)
+    for a, b in kept_links:
+        adj.setdefault(a, set()).add(b)
+
+    root = net.order()[0]
+    reachable = {root}
+    stack = [root]
+    while stack:
+        u = stack.pop()
+        for v in adj.get(u, ()):
+            if v not in reachable:
+                reachable.add(v)
+                stack.append(v)
+
+    steps = [s for s in net.steps
+             if s.reactant.name in reachable and s.product.name in reachable]
+    links = [(a, b) for a, b in kept_links if a in reachable and b in reachable]
+    return Network(net.slab_cfg, steps=steps, links=links)
+
+
+def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
+                  reagents: list[str] | None = None) -> Network:
     builders = {
         "oxidation": build_oxidation_network,
         "branching": build_branching_network,
@@ -308,4 +366,7 @@ def build_network(slab_cfg: SlabConfig, kind: str = "ammonia") -> Network:
     }
     if kind not in builders:
         raise ValueError(f"unknown network kind: {kind!r}")
-    return builders[kind](slab_cfg)
+    net = builders[kind](slab_cfg)
+    if reagents is not None:  # None = full template; a list (even []) filters
+        net = filter_by_reagents(net, reagents)
+    return net

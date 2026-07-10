@@ -1,0 +1,26 @@
+# Multi-substrate job: several (substrate -> target) networks in one run, stacked
+# into one union-column energy map.  Launch with:  atosim multi examples/multi_substrate.yaml
+#
+# Each `substrates:` entry is a full spec; fields not given fall back to the
+# top-level target/network/reagents.  Different networks contribute different
+# columns -> the combined map's columns are the UNION (NaN where absent).
+name: nox_panel
+network: ammonia          # default network for entries that omit it
+target: "NH3"
+
+substrates:
+  - {substrate: "NO", target: "NH3", network: ammonia}                 # full reduction to ammonia
+  - {substrate: "NO", target: "NO3", network: oxidation}               # oxidation to nitrate
+  - {substrate: "NO", target: "N+O", network: ammonia, reagents: []}   # dissociation only
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: emt
+
+search:
+  seeds: [0, 1, 2]

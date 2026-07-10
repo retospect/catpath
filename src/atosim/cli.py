@@ -16,10 +16,11 @@ import sys
 from pathlib import Path
 
 from .config import Config
+from .multi import run_multi, write_multi
 from .pipeline import aggregate_partials, run, run_one_seed, write_outputs
 from .sweep import run_sweep, write_sweep
 
-_COMMANDS = {"run", "seed", "aggregate", "sweep"}
+_COMMANDS = {"run", "seed", "aggregate", "sweep", "multi"}
 
 
 def _load(args) -> Config:
@@ -30,6 +31,9 @@ def _load(args) -> Config:
         cfg.mlip.models = [m.strip() for m in args.models.split(",")]
     if getattr(args, "seeds", None):
         cfg.search.seeds = [int(s) for s in args.seeds.split(",")]
+    if getattr(args, "reagents", None) is not None:
+        r = args.reagents.strip()
+        cfg.reagents = [x.strip() for x in r.split(",") if x.strip()] if r else []
     if getattr(args, "name", None):
         cfg.name = args.name
     if getattr(args, "outdir", None):
@@ -52,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
     common.add_argument("--models", help="multi-model: comma-separated, e.g. small,medium "
                                          "or mace:small,mace:medium")
     common.add_argument("--seeds", help="override seeds, comma-separated")
+    common.add_argument("--reagents", help="available reagent adatoms, comma-separated "
+                                           "(e.g. H or H,O); empty string = reagent-free only")
     common.add_argument("--name", help="override run name")
     common.add_argument("--outdir", help="override output directory")
 
@@ -69,8 +75,19 @@ def main(argv: list[str] | None = None) -> int:
     pw.add_argument("--elements", required=True,
                     help="comma-separated surface elements, e.g. Pd,Pt,Cu,Ni")
 
+    sub.add_parser("multi", parents=[common],
+                   help="run several substrates (config `substrates:`) -> combined energy map")
+
     args = p.parse_args(argv)
     cfg = _load(args)
+
+    if args.cmd == "multi":
+        specs = cfg.substrate_runs()
+        print(f"atosim multi: {len(specs)} substrate(s) on {cfg.slab.element}")
+        multi = run_multi(cfg)
+        outdir = write_multi(cfg, multi)
+        print(f"\nDone -> {outdir}")
+        return 0
 
     if args.cmd == "sweep":
         elements = [e.strip() for e in args.elements.split(",")]

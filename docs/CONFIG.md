@@ -8,6 +8,8 @@ name: nh3_run                # output folder name (runs/<name>/)
 substrate: "NO"              # starting species label (QUOTE it — bare NO = YAML false)
 target: "NH3"                # ending species label
 network: ammonia             # which reaction network template (see §Intermediates)
+reagents: ["H"]              # WHICH adatoms are available (filters branches) -> see §Reagents
+                             #   omit for the full template; [] = reagent-free (dissociation) only
 
 slab:                        # the ENVIRONMENT (catalyst surface)
   element: Pd                # any ASE fcc metal (EMT: Pd Pt Cu Ni Ag Au Al)
@@ -33,7 +35,9 @@ search:
   rmsd_thresh: 0.7           # Å, "same structure" threshold
   energy_thresh: 0.05        # eV, spread over this -> low_confidence flag
 
-substrates: []               # multi-substrate rows -> see §Substrates (LIMITED)
+substrates:                  # multi-substrate rows -> see §Substrates
+  - {substrate: "NO", target: "NH3", network: ammonia}
+  - {substrate: "NO", target: "NO3", network: oxidation}
 outdir: runs
 ```
 
@@ -49,14 +53,22 @@ mean ± spread; bump to 5–10 if a state is flagged low-confidence.
 `(model × seed)` combination is run and pooled, so error bars capture **both**
 model and seed variance. Leave `models: []` and set `model:` for a single model.
 
-## §Reagents — template-driven, NOT yet a config list ⚠️
-The reagents in the NO→NH₃ chemistry are the adatoms **O\*** and **H\*** that get
-added along the path. Right now they are **baked into the chosen `network`
-template** (the `+O*` / `+H*` "supply" steps and the composite states like
-`NO+H`), *not* specified as a `reagents:` list. So today you pick reagents
-implicitly by picking the network. There is no `reagents: [H, O]` knob yet —
-adding one (that auto-inserts hydrogenation/oxidation steps) is a clean
-extension.
+## §Reagents — first-class filter ✅
+`reagents:` lists **which adatoms are available** (`["H"]`, `["H", "O"]`, `[]`).
+Every supply link's required reagent is **derived from its stoichiometry** (the
+element it adds), not hardcoded, so a link is kept only when its adatom is
+allowed; any state left unreachable — and the steps touching it — is pruned.
+
+| `reagents:` | effect on the `ammonia` template |
+|---|---|
+| *(omitted / `null`)* | full curated network (back-compat default) |
+| `["H"]` | full reduction chain (ammonia uses only H\*) |
+| `[]` | reagent-free only: dissociation + site isomer (`NO`, `N+O`, `NO@top`) |
+
+On the `branching` template, `["O"]` keeps dissociation + oxidation (→NO₃) and
+drops the reduction fork; `["H"]` does the reverse. Override at the CLI with
+`--reagents H,O` (empty string `--reagents ""` = `[]`). This does **not** invent
+new intermediates — it gates the curated ones by available reagent.
 
 ## §Intermediates — curated templates, NOT autodetected ⚠️
 **We do not autodetect intermediates.** They are **curated** in
@@ -74,16 +86,20 @@ generation (apply reaction templates / graph-rewrite rules, prune, expand) is
 **not implemented** — it's the biggest open design item. What exists instead is
 reliable, inspectable, hand-curated networks.
 
-## §Substrates — single substrate per run (multi is limited) ⚠️
-One run explores **one** substrate→target network. The `substrates:` list is
-currently only a **label** for the energy-map row and does **not** launch
-separate networks. Two real ways to get multiple rows today:
-- **`atosim sweep --elements Pd,Pt,Cu,Ni`** — same network across surfaces
-  (catalyst screen). Fully works.
-- Run the tool once per substrate and combine the energy maps.
+## §Substrates — multi-substrate via `atosim multi` ✅
+Give `substrates:` a list of **spec dicts** (`{substrate, target, network,
+reagents}`; omitted fields inherit the top-level values) and run
+`atosim multi my.yaml`. Each entry gets its own full run + per-run artifacts,
+and all rows are stacked into one **union-column** energy map
+(`runs/<name>_multi/energy_map.png`): columns are the union of every network's
+states, cells are blank/`NaN` where a substrate never visits that state, and the
+★ rate-limiting marker tolerates the gaps. A bare-string entry (`- "NO"`) still
+works and inherits the top-level target/network/reagents.
 
-True multi-substrate (different starting molecules, each its own network, one
-matrix) needs per-substrate network templates — another clean extension.
+Two other multi-row paths:
+- **`atosim sweep --elements Pd,Pt,Cu,Ni`** — same network across surfaces
+  (catalyst screen); columns align exactly (intersection).
+- Run once per substrate and combine the maps by hand.
 
 ---
 
@@ -92,7 +108,7 @@ matrix) needs per-substrate network templates — another clean extension.
 |---|---|---|
 | Seeds (how many / which) | `search.seeds: [...]` | ✅ first-class |
 | Models (how many / which) | `mlip.models: [...]` | ✅ first-class |
-| Reagents (which) | implied by `network:` | ⚠️ template-driven, no list yet |
+| Reagents (which) | `reagents: [...]` (filters branches) | ✅ first-class |
 | Intermediates | `network:` template + editing `network.py` | ⚠️ curated, **not** autodetected |
-| Substrates (how many) | one per run; `sweep` for surfaces | ⚠️ single-substrate networks |
+| Substrates (how many) | `substrates: [...]` + `atosim multi` | ✅ multi-substrate |
 | Surface / lattice | `slab:` block (auto-relaxed) | ✅ first-class |

@@ -4,7 +4,10 @@ from atosim.network import (
     build_branching_network,
     build_network,
     build_oxidation_network,
+    filter_by_reagents,
 )
+
+_SLAB = SlabConfig(size=(2, 2, 3))
 
 
 def test_oxidation_network_is_linear_chain():
@@ -60,3 +63,52 @@ def test_all_steps_atom_conserving():
 def test_build_network_dispatch():
     assert len(build_network(SlabConfig(size=(2, 2, 3)), "oxidation").steps) == 2
     assert len(build_network(SlabConfig(size=(2, 2, 3)), "branching").steps) == 5
+
+
+# --- reagent filtering -------------------------------------------------------
+
+def test_reagents_none_is_full_template():
+    """reagents=None (default) leaves the curated network untouched."""
+    full = build_ammonia_network(_SLAB)
+    same = build_network(_SLAB, "ammonia", reagents=None)
+    assert set(same.states()) == set(full.states())
+    assert len(same.steps) == len(full.steps)
+
+
+def test_ammonia_full_needs_only_hydrogen():
+    """Ammonia chemistry uses only H* -> reagents=['H'] keeps the whole network."""
+    full = build_ammonia_network(_SLAB)
+    h_only = filter_by_reagents(full, ["H"])
+    assert set(h_only.states()) == set(full.states())
+    assert len(h_only.links) == len(full.links)
+
+
+def test_no_reagents_collapses_to_dissociation():
+    """reagents=[] drops every +adatom supply link -> only reagent-free steps."""
+    net = build_network(_SLAB, "ammonia", reagents=[])
+    assert set(net.states()) == {"NO", "N+O", "NO@top"}
+    assert {s.name for s in net.steps} == {"NO->N+O", "NO->NO@top"}
+    assert net.links == []
+    assert net.order()[0] == "NO"
+
+
+def test_oxygen_only_keeps_oxidation_drops_reduction():
+    net = build_network(_SLAB, "branching", reagents=["O"])
+    states = set(net.states())
+    assert {"NO", "N+O", "NO+O", "NO2", "NO2+O", "NO3"} == states
+    assert "HNO" not in states and "NOH" not in states and "NO+H" not in states
+
+
+def test_hydrogen_only_keeps_reduction_drops_oxidation():
+    net = build_network(_SLAB, "branching", reagents=["H"])
+    states = set(net.states())
+    assert {"NO", "N+O", "NO+H", "HNO", "NOH"} == states
+    assert "NO2" not in states and "NO3" not in states
+
+
+def test_filtered_steps_still_atom_conserving():
+    net = build_network(_SLAB, "ammonia", reagents=["H"])
+    slab = net.slab()
+    for step in net.steps:
+        r, p = step.reactant.build(slab), step.product.build(slab)
+        assert sorted(r.get_chemical_symbols()) == sorted(p.get_chemical_symbols())
