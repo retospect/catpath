@@ -43,6 +43,8 @@ class SlabConfig:
     size: tuple[int, int, int] = (3, 3, 4)
     vacuum: float = 10.0
     fix_layers: int = 2  # freeze this many bottom layers
+    a: float | None = None  # lattice constant (A); None -> ASE default or relaxed
+    relax_lattice: bool = True  # fit the bulk lattice constant to the chosen potential
 
 
 @dataclass

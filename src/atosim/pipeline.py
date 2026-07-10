@@ -29,7 +29,12 @@ from .network import Network, StateSpec, build_network
 from . import provenance
 from .neb import neb_barrier
 from .relax import pre_relax, relax
-from .structures import rattle_adsorbate, symbols_of
+from .structures import (
+    default_lattice,
+    equilibrium_lattice,
+    rattle_adsorbate,
+    symbols_of,
+)
 from .uncertainty import Estimate, aggregate
 from .validate import geometry_ok
 from .viz import draw_graph, draw_profile, energy_map
@@ -46,6 +51,8 @@ class Results:
     pathway: list[str] = field(default_factory=list)
     links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
     models: list[str] = field(default_factory=list)  # distinct model tags used
+    structures: dict = field(default_factory=dict)  # state -> relaxed Atoms (not serialised)
+    lattice: dict = field(default_factory=dict)  # model tag -> relaxed lattice constant (A)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -60,8 +67,13 @@ def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
     return res, geo
 
 
-def run_one_seed(cfg: Config, seed: int, log=print) -> dict:
-    """Run the whole network for a single seed -> a JSON-serialisable partial."""
+def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None) -> dict:
+    """Run the whole network for a single seed -> a JSON-serialisable partial.
+
+    If ``collect`` (a dict) is passed, the lowest-energy relaxed ``Atoms`` seen
+    for each state is stored in it (for structure thumbnails). Kept out of the
+    JSON partial since ``Atoms`` are not serialisable.
+    """
     net = build_network(cfg.slab, cfg.network)
     slab = net.slab()
     n_slab = slab.info["n_slab"]
@@ -82,6 +94,10 @@ def run_one_seed(cfg: Config, seed: int, log=print) -> dict:
         for st, res, geo in ((step.reactant, r_res, r_geo), (step.product, p_res, p_geo)):
             # keep the lowest energy seen for a state within this seed
             states[st.name] = min(states.get(st.name, np.inf), res.energy)
+            if collect is not None:
+                prev = collect.get(st.name)
+                if prev is None or res.energy < prev[0]:
+                    collect[st.name] = (res.energy, res.atoms.copy())
             if not geo.ok:
                 warnings.append(f"{st.name} seed={seed} geometry: {'; '.join(geo.reasons)}")
             if not res.converged:
@@ -159,16 +175,32 @@ def run(cfg: Config, log=print) -> Results:
     one mean +/- spread per level and barrier.
     """
     partials: list[dict] = []
-    for backend, model in cfg.mlip.specs():
+    structures: dict[str, tuple] = {}
+    lattice: dict[str, float] = {}
+    specs = cfg.mlip.specs()
+    for si, (backend, model) in enumerate(specs):
         tag = f"{backend}:{model}" if model else backend
         c = copy.deepcopy(cfg)
         c.mlip.backend, c.mlip.model, c.mlip.models = backend, model, []
+        # relax the bulk lattice constant to THIS potential (removes epitaxial strain)
+        if c.slab.relax_lattice and c.slab.a is None:
+            a0 = equilibrium_lattice(c.slab.element, lambda: make_calculator(c.mlip))
+            a_ref = default_lattice(c.slab.element)
+            log(f"[{tag}] relaxed lattice a={a0:.4f} A "
+                f"(default {a_ref:.4f} A, strain {(a_ref/a0 - 1) * 100:+.2f}%)")
+            c.slab.a = a0
+            lattice[tag] = a0
         for seed in cfg.search.seeds:
             log(f"=== model={tag} seed={seed} ===")
-            p = run_one_seed(c, seed, log=log)
+            # capture geometries only from the first model (single reference set)
+            p = run_one_seed(c, seed, log=log,
+                             collect=structures if si == 0 else None)
             p["model"] = tag
             partials.append(p)
-    return aggregate_partials(cfg, partials)
+    results = aggregate_partials(cfg, partials)
+    results.structures = {k: v[1] for k, v in structures.items()}
+    results.lattice = lattice
+    return results
 
 
 def write_outputs(cfg: Config, results: Results, log=print) -> Path:
@@ -215,6 +247,7 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
         "backend": cfg.mlip.backend, "models": results.models,
         "seeds": cfg.search.seeds,
         "n_samples": max(1, len(results.models)) * len(cfg.search.seeds),
+        "relaxed_lattice_A": results.lattice,
         "energy_reference": f"relative to substrate state '{results.pathway[0]}'",
         "pathway": results.pathway,
         "nodes": {k: v.as_dict() for k, v in results.node_energies.items()},

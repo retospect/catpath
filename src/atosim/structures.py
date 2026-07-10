@@ -10,10 +10,35 @@ from __future__ import annotations
 
 import numpy as np
 from ase import Atom, Atoms
-from ase.build import fcc111
+from ase.build import bulk, fcc111
 from ase.constraints import FixAtoms
+from ase.data import atomic_numbers, reference_states
+from ase.eos import EquationOfState
 
 from .config import SlabConfig
+
+
+def default_lattice(element: str) -> float:
+    """ASE reference (experimental) fcc lattice constant, in A."""
+    return float(reference_states[atomic_numbers[element]]["a"])
+
+
+def equilibrium_lattice(element: str, make_calc, a_guess: float | None = None,
+                        strain: float = 0.04, n: int = 7) -> float:
+    """Fit the potential's equilibrium fcc lattice constant via an EOS scan.
+
+    Removes the built-in epitaxial strain that arises from building a slab at a
+    lattice constant the ML/EMT potential does not actually prefer.
+    """
+    a0 = a_guess or default_lattice(element)
+    vols, ens = [], []
+    for s in np.linspace(1 - strain, 1 + strain, n):
+        at = bulk(element, "fcc", a=a0 * s)  # primitive cell, 1 atom
+        at.calc = make_calc()
+        vols.append(at.get_volume())
+        ens.append(at.get_potential_energy())
+    v0 = EquationOfState(vols, ens).fit()[0]
+    return float((4 * v0) ** (1 / 3))  # primitive volume = a^3 / 4 for fcc
 
 # High-symmetry adsorption sites on fcc(111), as fractional offsets we resolve
 # against ASE's computed site coordinates.
@@ -21,8 +46,12 @@ SITE_NAMES = ("ontop", "bridge", "fcc", "hcp")
 
 
 def build_slab(cfg: SlabConfig) -> Atoms:
-    """Return an fcc(111) slab with the bottom ``fix_layers`` layers frozen."""
-    slab = fcc111(cfg.element, size=cfg.size, vacuum=cfg.vacuum)
+    """Return an fcc(111) slab with the bottom ``fix_layers`` layers frozen.
+
+    Uses ``cfg.a`` as the lattice constant when set (e.g. the potential's relaxed
+    value); otherwise ASE's default reference constant.
+    """
+    slab = fcc111(cfg.element, size=cfg.size, vacuum=cfg.vacuum, a=cfg.a)
     slab.pbc = (True, True, True)
     n_per_layer = cfg.size[0] * cfg.size[1]
     z = slab.positions[:, 2]
