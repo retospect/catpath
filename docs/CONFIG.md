@@ -38,6 +38,12 @@ search:
 substrates:                  # multi-substrate rows -> see §Substrates
   - {substrate: "NO", target: "NH3", network: ammonia}
   - {substrate: "NO", target: "NO3", network: oxidation}
+
+render:                      # how active-site thumbnails/gallery are drawn
+  backend: matplotlib        # matplotlib (flat, no deps) | povray (ray-traced) -> see §Rendering
+  width: 320                 # povray canvas width per view (px)
+  bonds: true                # povray ball-and-stick bonds
+
 outdir: runs
 ```
 
@@ -101,6 +107,21 @@ Two other multi-row paths:
   (catalyst screen); columns align exactly (intersection).
 - Run once per substrate and combine the maps by hand.
 
+## §Rendering — matplotlib default, optional POV-Ray ✅
+`render.backend` picks how the active-site thumbnails and gallery are drawn:
+
+| backend | look | dependency |
+|---|---|---|
+| `matplotlib` (default) | flat CPK circles, top+side, shared zoom | none |
+| `povray` | ray-traced ball-and-stick, shadows/soft light, same fixed camera | `povray` binary |
+
+Both use the **same fixed top+side cameras and zoom window** (computed from the
+adsorbate's projected centroid), so states stay directly comparable across
+backends. POV-Ray needs the binary (`sudo apt-get install -y povray`); if it is
+absent, atosim **prints a warning, records it in `results.json`, and falls back
+to matplotlib** — the run never fails. Override at the CLI is via the config
+`render:` block (no dedicated flag).
+
 ---
 
 ### Summary
@@ -112,3 +133,4 @@ Two other multi-row paths:
 | Intermediates | `network:` template + editing `network.py` | ⚠️ curated, **not** autodetected |
 | Substrates (how many) | `substrates: [...]` + `atosim multi` | ✅ multi-substrate |
 | Surface / lattice | `slab:` block (auto-relaxed) | ✅ first-class |
+| Rendering | `render.backend: matplotlib\|povray` | ✅ first-class (povray optional) |

@@ -69,6 +69,15 @@ class MLIPConfig:
 
 
 @dataclass
+class RenderConfig:
+    """How to render active-site structure thumbnails/gallery."""
+
+    backend: str = "matplotlib"  # matplotlib (flat, no deps) | povray (ray-traced)
+    width: int = 320             # povray canvas width per view (px)
+    bonds: bool = True           # draw ball-and-stick bonds (povray)
+
+
+@dataclass
 class SearchConfig:
     pose_count: int = 4  # adsorption poses per adsorbate
     neb_images: int = 5  # intermediate images (excluding endpoints)
@@ -110,6 +119,7 @@ class Config:
     slab: SlabConfig = field(default_factory=SlabConfig)
     mlip: MLIPConfig = field(default_factory=MLIPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
+    render: RenderConfig = field(default_factory=RenderConfig)
     outdir: str = "runs"
 
     def __post_init__(self) -> None:
@@ -155,13 +165,14 @@ class Config:
         data = copy.deepcopy(data)
         slab = SlabConfig(**data.pop("slab", {}))
         mlip = MLIPConfig(**data.pop("mlip", {}))
+        render = RenderConfig(**data.pop("render", {}))
         search_data = data.pop("search", {})
         if "size" in search_data:  # tolerate misplacement
             search_data.pop("size")
         search = SearchConfig(**search_data)
         # normalise tuple fields that YAML gives as lists
         slab.size = tuple(slab.size)  # type: ignore[assignment]
-        cfg = cls(slab=slab, mlip=mlip, search=search, **data)
+        cfg = cls(slab=slab, mlip=mlip, search=search, render=render, **data)
         if not cfg.substrates:
             cfg.substrates = [cfg.substrate]
         return cfg

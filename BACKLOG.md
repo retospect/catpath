@@ -40,6 +40,13 @@ priority-ordered within sections.
   document resource requests (GPU per job). Also a plain `sbatch` wrapper.
 
 ## Visualization / design (dedicated pass)
+- [x] **POV-Ray render backend** — `render.backend: povray` ray-traces the
+  active-site thumbnails/gallery (same fixed top+side camera/zoom as matplotlib);
+  falls back to matplotlib with a warning if the `povray` binary is absent.
+  See `render.py`, `examples/render_povray.yaml`, `test_render.py`. NOTE: the
+  binary still needs a manual `sudo apt-get install -y povray` to actually
+  ray-trace; until then it transparently falls back. Once installed, do a visual
+  pass to tune bbox/zoom parity, lighting, and adsorbate emphasis.
 - [ ] **Discuss + choose color schemes** — consistent palette across profile,
   energy map, and gallery; emphasize adsorbate atoms vs slab; light/dark
   variants; colorblind-safe; per-pathway colors; CPK vs custom element colors.

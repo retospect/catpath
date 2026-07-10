@@ -235,13 +235,19 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
 
     # structure thumbnails: a gallery + with-thumbnail variants of both graphs
     if results.structures:
+        backend, warn = render.resolve_backend(cfg.render.backend)
+        if warn:
+            log(f"warning: {warn}")
+            results.warnings.append(warn)
+        rk = {"backend": backend, "width": cfg.render.width,
+              "bonds": cfg.render.bonds}
         sample = next(iter(results.structures.values()))
         n_slab = int(sample.info.get("n_slab", len(sample)))
         window = render.view_window(results.structures, n_slab)
-        thumbs = {name: render.thumb_array(atoms, n_slab, window)
+        thumbs = {name: render.thumb_array(atoms, n_slab, window, **rk)
                   for name, atoms in results.structures.items()}
         render.gallery(results.structures, results.node_energies,
-                       outdir / "gallery.png", n_slab)
+                       outdir / "gallery.png", n_slab, **rk)
         draw_profile(g, outdir / "graph_thumbs.png", title=title, caption=cap,
                      show_caption=True, png_meta=pmeta, thumbs=thumbs)
         draw_graph(g, outdir / "graph_network_thumbs.png", title=title, thumbs=thumbs)

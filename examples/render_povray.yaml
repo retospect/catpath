@@ -1,0 +1,25 @@
+# Ray-traced (POV-Ray) active-site thumbnails/gallery instead of flat circles.
+# Requires the `povray` binary on PATH:  sudo apt-get install -y povray
+# If it is missing, atosim warns and falls back to the matplotlib backend, so
+# this config always runs.
+name: nh3_povray
+substrate: "NO"
+target: "NH3"
+network: ammonia
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: emt
+
+search:
+  seeds: [0, 1, 2]
+
+render:
+  backend: povray       # matplotlib (default, no deps) | povray (ray-traced)
+  width: 320            # canvas width per view (px)
+  bonds: true           # ball-and-stick bonds

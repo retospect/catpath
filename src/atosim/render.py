@@ -10,11 +10,14 @@ tiny reagent isn't lost in a sea of metal.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from ase.visualize.plot import plot_atoms  # noqa: E402
@@ -22,6 +25,20 @@ from ase.visualize.plot import plot_atoms  # noqa: E402
 # Fixed cameras (ASE rotation strings) shared by every thumbnail.
 TOP_VIEW = ""              # look straight down +z (surface normal)
 SIDE_VIEW = "-90x"         # look along the cell a-axis (surface edge-on)
+
+
+def povray_available() -> bool:
+    """True when the ``povray`` binary is on PATH (the ray-traced backend)."""
+    return shutil.which("povray") is not None
+
+
+def resolve_backend(requested: str) -> tuple[str, str | None]:
+    """Return (backend, warning). Downgrade povray->matplotlib if unavailable."""
+    if requested == "povray" and not povray_available():
+        return "matplotlib", ("render.backend=povray requested but the 'povray' "
+                              "binary is not on PATH; falling back to matplotlib "
+                              "(install: apt-get install povray)")
+    return requested, None
 
 
 def active_site(atoms, n_slab: int, radius: float = 5.5):
@@ -71,9 +88,77 @@ def _draw_pair(fig, gs_top, gs_side, atoms, n_slab, window, radius, label=None):
         ax_t.set_title(label, fontsize=8, fontweight="bold")
 
 
+# --- POV-Ray backend (ray-traced; optional, needs the `povray` binary) -------
+
+def _projected_center(sub, rotation: str, n_ads: int) -> np.ndarray:
+    """Adsorbate centroid in the rotated image plane -> fixes the crop per view."""
+    from ase.io.utils import PlottingVariables
+    pv = PlottingVariables(sub, scale=1.0, rotation=rotation)
+    proj = pv.positions[:, :2]
+    ads = proj[len(sub) - n_ads:] if n_ads else proj
+    return ads.mean(0)
+
+
+def _write_pov_scene(sub, rotation: str, window: float, n_ads: int,
+                     out_pov: Path, width: int, bonds: bool):
+    """Write a .pov/.ini scene (no render). Fixed bbox -> shared zoom per view."""
+    from ase.io.pov import get_bondpairs, write_pov
+    cx, cy = _projected_center(sub, rotation, n_ads)
+    bbox = (cx - window, cy - window, cx + window, cy + window)
+    settings: dict = {"canvas_width": int(width), "transparent": True,
+                      "camera_type": "orthographic"}
+    if bonds:
+        settings["bondatoms"] = get_bondpairs(sub, radius=1.1)
+    return write_pov(str(out_pov), sub, rotation=rotation, radii=0.6,
+                     show_unit_cell=0, bbox=bbox, povray_settings=settings)
+
+
+def _pov_view_array(sub, rotation: str, window: float, n_ads: int,
+                    width: int, bonds: bool) -> np.ndarray:
+    """Ray-trace one view to an RGBA uint8 array."""
+    with tempfile.TemporaryDirectory() as td:
+        pov = Path(td) / "scene.pov"
+        inputs = _write_pov_scene(sub, rotation, window, n_ads, pov, width, bonds)
+        png = inputs.render(clean_up=False)
+        arr = mpimg.imread(str(png))
+    if arr.ndim == 3 and arr.shape[-1] == 3:  # opaque -> add full alpha
+        arr = np.dstack([arr, np.ones(arr.shape[:2])])
+    return (arr * 255).astype(np.uint8)
+
+
+def _vstack_rgba(top: np.ndarray, bottom: np.ndarray) -> np.ndarray:
+    """Stack two RGBA images vertically, padding to equal width (transparent)."""
+    w = max(top.shape[1], bottom.shape[1])
+
+    def pad(a):
+        if a.shape[1] == w:
+            return a
+        p = np.zeros((a.shape[0], w - a.shape[1], 4), a.dtype)
+        return np.hstack([a, p])
+
+    return np.vstack([pad(top), pad(bottom)])
+
+
+def _pov_pair_array(atoms, n_slab: int, window: float, radius: float,
+                    width: int, bonds: bool) -> np.ndarray:
+    """Ray-traced top-over-side pair (mirrors the matplotlib thumbnail layout)."""
+    sub, _ = active_site(atoms, n_slab, radius)
+    n_ads = max(0, len(atoms) - n_slab)
+    top = _pov_view_array(sub, TOP_VIEW, window, n_ads, width, bonds)
+    side = _pov_view_array(sub, SIDE_VIEW, window, n_ads, width, bonds)
+    return _vstack_rgba(top, side)
+
+
 def thumb_array(atoms, n_slab: int, window: float, radius: float = 5.5,
-                px: int = 220) -> np.ndarray:
-    """Return an RGBA array: top view stacked over side view (roughly square)."""
+                px: int = 220, backend: str = "matplotlib",
+                width: int = 320, bonds: bool = True) -> np.ndarray:
+    """Return an RGBA array: top view stacked over side view (roughly square).
+
+    ``backend="povray"`` ray-traces the pair (requires the ``povray`` binary);
+    the default matplotlib backend draws flat CPK circles with no dependencies.
+    """
+    if backend == "povray":
+        return _pov_pair_array(atoms, n_slab, window, radius, width, bonds)
     fig = plt.figure(figsize=(px / 100, px / 100), dpi=100)
     gs = fig.add_gridspec(2, 1, hspace=0.02)
     _draw_pair(fig, gs[0, 0], gs[1, 0], atoms, n_slab, window, radius)
@@ -84,24 +169,52 @@ def thumb_array(atoms, n_slab: int, window: float, radius: float = 5.5,
     return arr
 
 
+def _cell_label(name: str, est, labels: bool) -> str | None:
+    if not labels:
+        return None
+    if est is not None:
+        return f"{name}  ({est.mean:+.2f}±{est.std:.2f} eV)"
+    return name
+
+
 def gallery(structures: dict, node_energies: dict, path: str | Path,
             n_slab: int, cols: int = 4, radius: float = 5.5,
-            labels: bool = True) -> None:
-    """Contact sheet: dual view per state, optionally labelled with energy +- sd."""
+            labels: bool = True, backend: str = "matplotlib",
+            width: int = 320, bonds: bool = True) -> None:
+    """Contact sheet: dual view per state, optionally labelled with energy +- sd.
+
+    ``backend="povray"`` ray-traces each cell (needs the ``povray`` binary);
+    otherwise flat matplotlib CPK circles are drawn (the dependency-free default).
+    """
     names = list(structures)
     window = view_window(structures, n_slab, radius)
     rows = (len(names) + cols - 1) // cols
+
+    if backend == "povray":
+        fig = plt.figure(figsize=(2.2 * cols, 2.6 * rows))
+        for k, name in enumerate(names):
+            ax = fig.add_subplot(rows, cols, k + 1)
+            arr = _pov_pair_array(structures[name], n_slab, window, radius,
+                                  width, bonds)
+            ax.imshow(arr)
+            ax.set_axis_off()
+            lab = _cell_label(name, node_energies.get(name), labels)
+            if lab:
+                ax.set_title(lab, fontsize=8, fontweight="bold")
+        fig.suptitle("Active-site structures (POV-Ray; top / side, shared scale)",
+                     fontsize=11)
+        fig.savefig(path, dpi=140, bbox_inches="tight")
+        plt.close(fig)
+        return
+
     fig = plt.figure(figsize=(2.2 * cols, 2.6 * rows))
     outer = fig.add_gridspec(rows, cols, wspace=0.15, hspace=0.28)
     for k, name in enumerate(names):
         r, c = divmod(k, cols)
         inner = outer[r, c].subgridspec(2, 1, hspace=0.02)
-        est = node_energies.get(name)
-        lab = name
-        if labels and est is not None:
-            lab = f"{name}  ({est.mean:+.2f}±{est.std:.2f} eV)"
+        lab = _cell_label(name, node_energies.get(name), labels)
         _draw_pair(fig, inner[0, 0], inner[1, 0], structures[name], n_slab,
-                   window, radius, label=lab if labels else None)
+                   window, radius, label=lab)
     fig.suptitle("Active-site structures (top / side views, shared scale)",
                  fontsize=11)
     fig.savefig(path, dpi=140, bbox_inches="tight")
