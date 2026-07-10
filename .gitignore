@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.snakemake/
+runs/
+*.traj
+*.log
+!examples/*.log
+.uv/
+build/
+dist/

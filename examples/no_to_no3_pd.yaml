@@ -1,0 +1,26 @@
+# First target: NO -> NO3 oxidation on Pd(111).
+# Dev/demo uses the EMT backend (fast, qualitative). Switch mlip.backend to
+# "mace" or "fairchem" on the GB10 GPU for production accuracy.
+name: no_to_no3_pd
+substrate: "NO"    # quote! bare NO is YAML boolean false
+target: "NO3"
+
+slab:
+  element: Pd
+  size: [3, 3, 4]     # 3x3 surface cell, 4 layers
+  vacuum: 10.0
+  fix_layers: 2       # freeze bottom 2 layers
+
+mlip:
+  backend: emt        # emt | mace | fairchem
+  device: cpu
+
+search:
+  neb_images: 5
+  fmax: 0.05
+  max_steps: 200
+  seeds: [0, 1, 2]    # >=3 seeds for a mean +/- spread
+  rmsd_thresh: 0.7
+  energy_thresh: 0.05
+
+outdir: runs
