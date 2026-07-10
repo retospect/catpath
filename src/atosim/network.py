@@ -1,23 +1,28 @@
-"""Reaction network: rule-guided intermediate generation.
+"""Reaction network: rule-guided intermediate generation (branching DAG).
 
-For the first target we hard-code the well-studied NO oxidation network on a
-metal(111) surface as a set of atom-conserving elementary steps::
+Two networks are available:
 
-    NO*  + O*  ->  NO2*
-    NO2* + O*  ->  NO3*
+* ``oxidation`` - the minimal linear chain NO+O -> NO2 -> NO2+O -> NO3.
+* ``branching`` (default) - a richer DAG rooted at adsorbed NO with THREE
+  competing pathways, so the reaction graph shows multiple routes:
 
-Each step's reactant and product are built with the **same adsorbate atom order**
-(so NEB can interpolate).  The extra oxygen is modelled as a co-adsorbed adatom
-already present in the reactant (keeping atom counts equal across the step).
+      dissociation:  NO -> N + O
+      oxidation:     NO -(+O*)-> NO+O -> NO2 -(+O*)-> NO2+O -> NO3
+      reduction:     NO -(+H*)-> NO+H -> HNO      (H binds N)
+                                 NO+H -> NOH      (H binds O)   <- the fork
 
-``build_network`` returns a generic structure so future substrates / templates
-can plug in without changing the pipeline.
+Every **reaction** step is atom-conserving so NEB can interpolate; the extra
+adatom (O* or H*) is carried in the reactant.  **Supply** links (``+O*`` / ``+H*``)
+bridge states of different stoichiometry and carry no barrier - they only wire
+the graph together.  Adding more branches (NH -> NH2 -> NH3, OH -> H2O, ...) is
+just more ``StepSpec``/link entries.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import networkx as nx
 from ase import Atoms
 
 from .config import SlabConfig
@@ -47,6 +52,7 @@ class StepSpec:
 class Network:
     slab_cfg: SlabConfig
     steps: list[StepSpec] = field(default_factory=list)
+    links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
 
     def slab(self) -> Atoms:
         return build_slab(self.slab_cfg)
@@ -54,65 +60,128 @@ class Network:
     def states(self) -> dict[str, StateSpec]:
         out: dict[str, StateSpec] = {}
         for st in self.steps:
-            out[st.reactant.name] = st.reactant
-            out[st.product.name] = st.product
+            out.setdefault(st.reactant.name, st.reactant)
+            out.setdefault(st.product.name, st.product)
         return out
 
-
-# --- NO -> NO3 template ------------------------------------------------------
-
-def _no_plus_o() -> StateSpec:
-    return StateSpec(
-        "NO+O", "NO",
-        [
-            {"symbol": "N", "site": "fcc", "height": 1.8},
-            {"symbol": "O", "site": "fcc", "height": 3.0},          # the N-O oxygen
-            {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.2},  # adatom O*
-        ],
-    )
-
-
-def _no2() -> StateSpec:
-    return StateSpec(
-        "NO2", "NO2",
-        [
-            {"symbol": "N", "site": "fcc", "height": 2.0},
-            {"symbol": "O", "site": "fcc", "height": 2.4, "dx": 0.9, "dy": 0.6},
-            {"symbol": "O", "site": "fcc", "height": 2.4, "dx": -0.9, "dy": 0.6},
-        ],
-    )
+    def order(self) -> list[str]:
+        """Topological ordering of all states (columns of the energy map)."""
+        g = nx.DiGraph()
+        g.add_nodes_from(self.states())
+        for s in self.steps:
+            g.add_edge(s.reactant.name, s.product.name)
+        for a, b in self.links:
+            g.add_edge(a, b)
+        try:
+            return list(nx.topological_sort(g))
+        except nx.NetworkXUnfeasible:
+            return list(self.states())
 
 
-def _no2_plus_o() -> StateSpec:
-    return StateSpec(
-        "NO2+O", "NO2",
-        [
-            {"symbol": "N", "site": "fcc", "height": 2.0},
-            {"symbol": "O", "site": "fcc", "height": 2.4, "dx": 0.9, "dy": 0.6},
-            {"symbol": "O", "site": "fcc", "height": 2.4, "dx": -0.9, "dy": 0.6},
-            {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.4},  # adatom O*
-        ],
-    )
+# --- state library (placements chosen so fragments do not overlap) ----------
+
+def _NO() -> StateSpec:
+    return StateSpec("NO", "NO", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "O", "site": "fcc", "height": 3.0},
+    ])
 
 
-def _no3() -> StateSpec:
-    return StateSpec(
-        "NO3", "NO3",
-        [
-            {"symbol": "N", "site": "fcc", "height": 2.2},
-            {"symbol": "O", "site": "fcc", "height": 2.5, "dx": 1.1, "dy": 0.0},
-            {"symbol": "O", "site": "fcc", "height": 2.5, "dx": -0.55, "dy": 0.95},
-            {"symbol": "O", "site": "fcc", "height": 2.5, "dx": -0.55, "dy": -0.95},
-        ],
-    )
+def _N_O() -> StateSpec:  # dissociated N* + O*
+    return StateSpec("N+O", "N.O", [
+        {"symbol": "N", "site": "fcc", "height": 1.6},
+        {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.4},
+    ])
 
 
-def build_network(slab_cfg: SlabConfig) -> Network:
-    """The NO -> NO2 -> NO3 oxidation network."""
+def _NO_O() -> StateSpec:
+    return StateSpec("NO+O", "NO", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "O", "site": "fcc", "height": 3.0},
+        {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.2},
+    ])
+
+
+def _NO2() -> StateSpec:
+    return StateSpec("NO2", "NO2", [
+        {"symbol": "N", "site": "fcc", "height": 2.0},
+        {"symbol": "O", "site": "fcc", "height": 2.4, "dx": 0.9, "dy": 0.6},
+        {"symbol": "O", "site": "fcc", "height": 2.4, "dx": -0.9, "dy": 0.6},
+    ])
+
+
+def _NO2_O() -> StateSpec:
+    return StateSpec("NO2+O", "NO2", [
+        {"symbol": "N", "site": "fcc", "height": 2.0},
+        {"symbol": "O", "site": "fcc", "height": 2.4, "dx": 0.9, "dy": 0.6},
+        {"symbol": "O", "site": "fcc", "height": 2.4, "dx": -0.9, "dy": 0.6},
+        {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.4},
+    ])
+
+
+def _NO3() -> StateSpec:
+    return StateSpec("NO3", "NO3", [
+        {"symbol": "N", "site": "fcc", "height": 2.2},
+        {"symbol": "O", "site": "fcc", "height": 2.5, "dx": 1.1, "dy": 0.0},
+        {"symbol": "O", "site": "fcc", "height": 2.5, "dx": -0.55, "dy": 0.95},
+        {"symbol": "O", "site": "fcc", "height": 2.5, "dx": -0.55, "dy": -0.95},
+    ])
+
+
+def _NO_H() -> StateSpec:  # NO* + H* (H as a separate adatom)
+    return StateSpec("NO+H", "NO", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "O", "site": "fcc", "height": 3.0},
+        {"symbol": "H", "site": "hcp", "height": 1.2, "dx": 2.2},
+    ])
+
+
+def _HNO() -> StateSpec:  # H bound to N
+    return StateSpec("HNO", "HNO", [
+        {"symbol": "N", "site": "fcc", "height": 1.9},
+        {"symbol": "O", "site": "fcc", "height": 3.1},
+        {"symbol": "H", "site": "fcc", "height": 1.9, "dx": 1.0, "dy": 0.3},
+    ])
+
+
+def _NOH() -> StateSpec:  # H bound to O
+    return StateSpec("NOH", "NOH", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "O", "site": "fcc", "height": 3.0},
+        {"symbol": "H", "site": "fcc", "height": 4.0},  # atop the O
+    ])
+
+
+def build_oxidation_network(slab_cfg: SlabConfig) -> Network:
+    """Minimal linear chain (used by the fast tests)."""
+    return Network(slab_cfg, steps=[
+        StepSpec("NO+O->NO2", _NO_O(), _NO2()),
+        StepSpec("NO2+O->NO3", _NO2_O(), _NO3()),
+    ])
+
+
+def build_branching_network(slab_cfg: SlabConfig) -> Network:
+    """Dissociation + oxidation + reduction, rooted at adsorbed NO."""
     return Network(
-        slab_cfg=slab_cfg,
+        slab_cfg,
         steps=[
-            StepSpec("NO+O->NO2", _no_plus_o(), _no2()),
-            StepSpec("NO2+O->NO3", _no2_plus_o(), _no3()),
+            StepSpec("NO->N+O", _NO(), _N_O()),          # dissociation
+            StepSpec("NO+O->NO2", _NO_O(), _NO2()),      # oxidation
+            StepSpec("NO2+O->NO3", _NO2_O(), _NO3()),
+            StepSpec("NO+H->HNO", _NO_H(), _HNO()),      # reduction, N-H
+            StepSpec("NO+H->NOH", _NO_H(), _NOH()),      # reduction, O-H (fork)
+        ],
+        links=[
+            ("NO", "NO+O"),      # +O*
+            ("NO", "NO+H"),      # +H*
+            ("NO2", "NO2+O"),    # +O*
         ],
     )
+
+
+def build_network(slab_cfg: SlabConfig, kind: str = "branching") -> Network:
+    if kind == "oxidation":
+        return build_oxidation_network(slab_cfg)
+    if kind == "branching":
+        return build_branching_network(slab_cfg)
+    raise ValueError(f"unknown network kind: {kind!r}")

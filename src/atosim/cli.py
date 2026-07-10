@@ -17,8 +17,9 @@ from pathlib import Path
 
 from .config import Config
 from .pipeline import aggregate_partials, run, run_one_seed, write_outputs
+from .sweep import run_sweep, write_sweep
 
-_COMMANDS = {"run", "seed", "aggregate"}
+_COMMANDS = {"run", "seed", "aggregate", "sweep"}
 
 
 def _load(args) -> Config:
@@ -59,8 +60,21 @@ def main(argv: list[str] | None = None) -> int:
     pa = sub.add_parser("aggregate", parents=[common], help="combine partials")
     pa.add_argument("--partials", nargs="+", required=True)
 
+    pw = sub.add_parser("sweep", parents=[common],
+                        help="run the network across surfaces -> multi-row energy map")
+    pw.add_argument("--elements", required=True,
+                    help="comma-separated surface elements, e.g. Pd,Pt,Cu,Ni")
+
     args = p.parse_args(argv)
     cfg = _load(args)
+
+    if args.cmd == "sweep":
+        elements = [e.strip() for e in args.elements.split(",")]
+        print(f"atosim sweep: {cfg.substrate} -> {cfg.target} on {elements}")
+        sweep = run_sweep(cfg, elements)
+        outdir = write_sweep(cfg, sweep)
+        print(f"\nDone -> {outdir}")
+        return 0
 
     if args.cmd == "seed":
         partial = run_one_seed(cfg, args.seed)

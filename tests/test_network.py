@@ -1,27 +1,47 @@
 from atosim.config import SlabConfig
-from atosim.network import build_network
+from atosim.network import (
+    build_branching_network,
+    build_network,
+    build_oxidation_network,
+)
 
 
-def test_network_steps():
-    net = build_network(SlabConfig(size=(2, 2, 3)))
-    assert len(net.steps) == 2
-    names = [s.name for s in net.steps]
-    assert names == ["NO+O->NO2", "NO2+O->NO3"]
+def test_oxidation_network_is_linear_chain():
+    net = build_oxidation_network(SlabConfig(size=(2, 2, 3)))
+    assert [s.name for s in net.steps] == ["NO+O->NO2", "NO2+O->NO3"]
+    assert set(net.states()) == {"NO+O", "NO2", "NO2+O", "NO3"}
 
 
-def test_step_endpoints_atom_conserving():
-    """NEB requires reactant and product to have identical atom counts."""
-    net = build_network(SlabConfig(size=(2, 2, 3)))
-    slab = net.slab()
-    for step in net.steps:
-        r = step.reactant.build(slab)
-        p = step.product.build(slab)
-        assert len(r) == len(p), step.name
-        # same multiset of elements
-        assert sorted(r.get_chemical_symbols()) == sorted(p.get_chemical_symbols())
+def test_branching_network_has_fork_and_links():
+    net = build_branching_network(SlabConfig(size=(2, 2, 3)))
+    # three pathways rooted at NO -> more than the linear chain
+    assert set(net.states()) == {
+        "NO", "N+O", "NO+O", "NO2", "NO2+O", "NO3", "NO+H", "HNO", "NOH"
+    }
+    # the reduction fork: NO+H is the reactant of two different steps
+    reactants = [s.reactant.name for s in net.steps]
+    assert reactants.count("NO+H") == 2
+    assert ("NO", "NO+H") in net.links
 
 
-def test_states_unique():
-    net = build_network(SlabConfig(size=(2, 2, 3)))
-    states = net.states()
-    assert set(states) == {"NO+O", "NO2", "NO2+O", "NO3"}
+def test_branching_order_starts_at_root():
+    net = build_branching_network(SlabConfig(size=(2, 2, 3)))
+    order = net.order()
+    assert order[0] == "NO"  # topological root (the substrate)
+    assert set(order) == set(net.states())
+
+
+def test_all_steps_atom_conserving():
+    """NEB requires reactant/product to have identical atoms (both networks)."""
+    for builder in (build_oxidation_network, build_branching_network):
+        net = builder(SlabConfig(size=(2, 2, 3)))
+        slab = net.slab()
+        for step in net.steps:
+            r, p = step.reactant.build(slab), step.product.build(slab)
+            assert len(r) == len(p), step.name
+            assert sorted(r.get_chemical_symbols()) == sorted(p.get_chemical_symbols())
+
+
+def test_build_network_dispatch():
+    assert len(build_network(SlabConfig(size=(2, 2, 3)), "oxidation").steps) == 2
+    assert len(build_network(SlabConfig(size=(2, 2, 3)), "branching").steps) == 5

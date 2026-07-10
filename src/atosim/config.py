@@ -71,6 +71,7 @@ class Config:
     name: str = "run"
     substrate: str = "NO"  # starting adsorbate label
     target: str = "NO3"  # ending adsorbate label
+    network: str = "branching"  # branching | oxidation
     substrates: list[str] = field(default_factory=list)  # rows of the energy map
     slab: SlabConfig = field(default_factory=SlabConfig)
     mlip: MLIPConfig = field(default_factory=MLIPConfig)

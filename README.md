@@ -42,7 +42,8 @@ Outputs land in `runs/<name>/`:
 
 | File | Contents |
 |---|---|
-| `graph.png` | reaction graph, energy-ordered; red = low-confidence node |
+| `graph.png` | **reaction energy-profile diagram** — each species a labelled level line, transition states as barrier bumps, competing pathways overlaid |
+| `graph_network.png` | node/DAG view; red = low-confidence node |
 | `energy_map.png` | substrate × intermediate heatmap; ★ = rate-limiting state |
 | `results.json` | nodes, edges, barriers, mean ± spread, warnings |
 | `nodes.csv` / `edges.csv` | machine-readable graph |
@@ -52,10 +53,20 @@ Outputs land in `runs/<name>/`:
 ## How it works
 
 ```
-inputs → build network (NO+O→NO2→NO2+O→NO3)
+inputs → build branching network (dissociation | oxidation | reduction fork)
        → per seed: rattle poses → cheap pre-relax → MLIP relax → CI-NEB barrier
        → aggregate across seeds (mean ± spread; flag unstable states)
-       → reaction graph + energy map → validate → outputs
+       → energy profile + node graph + energy map → validate → outputs
+```
+
+The default `branching` network is a DAG rooted at adsorbed NO with three
+competing routes (set `network: oxidation` for the minimal linear chain):
+
+```
+dissociation:  NO → N + O
+oxidation:     NO ─(+O*)→ NO+O → NO2 ─(+O*)→ NO2+O → NO3
+reduction:     NO ─(+H*)→ NO+H → HNO   (H binds N)
+                            NO+H → NOH   (H binds O)   ← fork
 ```
 
 - **Pluggable MLIP** (`calculators.py`): `emt` (dev) · `mace` · `fairchem`.

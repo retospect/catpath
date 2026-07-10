@@ -30,7 +30,7 @@ from .relax import pre_relax, relax
 from .structures import rattle_adsorbate, symbols_of
 from .uncertainty import Estimate, aggregate
 from .validate import geometry_ok
-from .viz import draw_graph, energy_map
+from .viz import draw_graph, draw_profile, energy_map
 
 
 def g_has_edge(edges: list[dict], a: str, b: str) -> bool:
@@ -42,16 +42,8 @@ class Results:
     node_energies: dict[str, Estimate] = field(default_factory=dict)
     edges: list[dict] = field(default_factory=list)
     pathway: list[str] = field(default_factory=list)
+    links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
     warnings: list[str] = field(default_factory=list)
-
-
-def _pathway(net: Network) -> list[str]:
-    order: list[str] = []
-    for step in net.steps:
-        for n in (step.reactant.name, step.product.name):
-            if n not in order:
-                order.append(n)
-    return order
 
 
 def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
@@ -67,7 +59,7 @@ def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
 
 def run_one_seed(cfg: Config, seed: int, log=print) -> dict:
     """Run the whole network for a single seed -> a JSON-serialisable partial."""
-    net = build_network(cfg.slab)
+    net = build_network(cfg.slab, cfg.network)
     slab = net.slab()
     n_slab = slab.info["n_slab"]
 
@@ -115,8 +107,9 @@ def run_one_seed(cfg: Config, seed: int, log=print) -> dict:
 
 def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
     """Combine per-seed partials into mean +/- spread Estimates."""
-    net = build_network(cfg.slab)
-    results = Results(pathway=_pathway(net))
+    net = build_network(cfg.slab, cfg.network)
+    results = Results(pathway=net.order())
+    results.links = list(net.links)
 
     state_vals: dict[str, list[float]] = {}
     step_bar: dict[str, list[float]] = {}
@@ -158,20 +151,20 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
 
     ref = results.node_energies[results.pathway[0]].mean
 
-    # link consecutive states (product of one step -> reactant of next) with a
-    # dashed "O supply" edge so the graph reads as one pathway. These differ in
-    # stoichiometry (an O adatom is added), so they carry no reaction barrier.
+    # dashed "supply" edges (+O* / +H*) bridge states of different stoichiometry
+    # so the branching graph is connected. They carry no reaction barrier.
     edges = list(results.edges)
-    for a, b in zip(results.pathway, results.pathway[1:]):
+    for a, b in results.links:
         if not g_has_edge(results.edges, a, b):
-            edges.append({"name": f"{a}+O*", "reactant": a, "product": b,
+            edges.append({"name": f"{a}->{b}", "reactant": a, "product": b,
                           "kind": "supply"})
 
     g = build_graph(results.node_energies, edges, energy_ref=ref)
     to_json(g, outdir / "graph.json")
     to_csv(g, outdir / "nodes.csv", outdir / "edges.csv")
-    draw_graph(g, outdir / "graph.png",
-               title=f"{cfg.substrate} -> {cfg.target} on {cfg.slab.element}")
+    title = f"{cfg.substrate} -> {cfg.target} on {cfg.slab.element}"
+    draw_profile(g, outdir / "graph.png", title=title)          # energy profile
+    draw_graph(g, outdir / "graph_network.png", title=title)    # node/DAG view
 
     # substrate x intermediate energy map (one row per substrate; here 1 substrate)
     cols = results.pathway

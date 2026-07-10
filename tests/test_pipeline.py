@@ -12,6 +12,7 @@ from atosim import pipeline
 
 def tiny_cfg(tmp_path):
     cfg = Config(name="itest", outdir=str(tmp_path))
+    cfg.network = "oxidation"  # fast linear chain for the integration test
     cfg.slab = SlabConfig(size=(2, 2, 3), vacuum=8.0, fix_layers=1)
     cfg.search.seeds = [0, 1]
     cfg.search.max_steps = 20

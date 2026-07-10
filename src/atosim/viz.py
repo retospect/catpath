@@ -48,6 +48,78 @@ def draw_graph(g: nx.DiGraph, path: str | Path, title: str = "Reaction graph") -
     plt.close(fig)
 
 
+def _hump(x0, y0, x1, y1, y_peak, n=40):
+    """Smooth cosine curve from (x0,y0) up to a peak y_peak then down to (x1,y1)."""
+    xm = (x0 + x1) / 2
+    t1 = np.linspace(0, 1, n // 2)
+    xa = x0 + (xm - x0) * t1
+    ya = y0 + (y_peak - y0) * (1 - np.cos(np.pi * t1)) / 2
+    t2 = np.linspace(0, 1, n // 2)
+    xb = xm + (x1 - xm) * t2
+    yb = y_peak + (y1 - y_peak) * (1 - np.cos(np.pi * t2)) / 2
+    return np.concatenate([xa, xb]), np.concatenate([ya, yb])
+
+
+def draw_profile(g, path: str | Path, title: str = "Reaction energy profile") -> None:
+    """Reaction-coordinate energy diagram.
+
+    Each species is a bold horizontal level line labelled with its name; each
+    reaction is a transition-state *bump* between two levels whose height above
+    the reactant equals the barrier; barrierless "supply" steps are dashed
+    connectors.  Every root->leaf pathway is drawn as its own coloured profile,
+    so competing pathways are overlaid on one plot.
+    """
+    roots = [n for n, d in g.in_degree() if d == 0] or [next(iter(g.nodes))]
+    leaves = [n for n, d in g.out_degree() if d == 0]
+    paths = []
+    for r in roots:
+        for lf in leaves:
+            paths.extend(nx.all_simple_paths(g, r, lf))
+    if not paths:
+        paths = [list(g.nodes)]
+
+    cmap = plt.get_cmap("tab10")
+    fig, ax = plt.subplots(figsize=(2 + 2.2 * max(len(p) for p in paths), 6))
+    half = 0.34  # half-width of a level bar
+    labeled: set[tuple[int, str]] = set()
+
+    for pi, nodes in enumerate(paths):
+        color = cmap(pi % 10)
+        ys = [g.nodes[n]["rel_energy"] for n in nodes]
+        for i, (n, y) in enumerate(zip(nodes, ys)):
+            ax.hlines(y, i - half, i + half, color=color, lw=4, zorder=3)
+            if (i, n) not in labeled:  # label each level once per x position
+                ax.text(i, y + 0.02, n, ha="center", va="bottom",
+                        fontsize=9, fontweight="bold", color=color, zorder=4)
+                labeled.add((i, n))
+        for i in range(len(nodes) - 1):
+            u, v = nodes[i], nodes[i + 1]
+            d = g[u][v]
+            y0, y1 = ys[i], ys[i + 1]
+            if d.get("kind") == "supply":
+                ax.plot([i + half, i + 1 - half], [y0, y1], ls=":",
+                        color=color, alpha=0.6, lw=1.5, zorder=2)
+            else:
+                peak = y0 + max(d["barrier"], 0.0)
+                xs, yc = _hump(i + half, y0, i + 1 - half, y1, peak)
+                ax.plot(xs, yc, color=color, lw=2, zorder=2)
+                if d["barrier"] > 1e-3:
+                    ax.annotate(f"Ea={d['barrier']:.2f}", xy=((2 * i + 1) / 2, peak),
+                                xytext=(0, 4), textcoords="offset points",
+                                ha="center", fontsize=7, color=color)
+        ax.plot([], [], color=color, lw=3, label=" -> ".join(nodes))
+
+    ax.set_xlabel("reaction coordinate")
+    ax.set_ylabel("relative energy (eV)")
+    ax.set_title(title)
+    ax.set_xticks([])
+    ax.legend(fontsize=7, loc="best", framealpha=0.9)
+    ax.margins(x=0.05, y=0.15)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def energy_map(
     matrix: np.ndarray,
     row_labels: list[str],
