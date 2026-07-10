@@ -26,7 +26,7 @@ from .calculators import check_supported, make_calculator
 from .config import Config
 from .graph import build_graph, to_csv, to_json
 from .network import Network, StateSpec, build_network
-from . import provenance
+from . import provenance, render
 from .neb import neb_barrier
 from .relax import pre_relax, relax
 from .structures import (
@@ -232,6 +232,19 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
                  show_caption=True, png_meta=pmeta)
     draw_graph(g, outdir / "graph_network.png", title=title)       # node/DAG view
     (outdir / "methods.md").write_text(provenance.methods_text(cfg, results))
+
+    # structure thumbnails: a gallery + with-thumbnail variants of both graphs
+    if results.structures:
+        sample = next(iter(results.structures.values()))
+        n_slab = int(sample.info.get("n_slab", len(sample)))
+        window = render.view_window(results.structures, n_slab)
+        thumbs = {name: render.thumb_array(atoms, n_slab, window)
+                  for name, atoms in results.structures.items()}
+        render.gallery(results.structures, results.node_energies,
+                       outdir / "gallery.png", n_slab)
+        draw_profile(g, outdir / "graph_thumbs.png", title=title, caption=cap,
+                     show_caption=True, png_meta=pmeta, thumbs=thumbs)
+        draw_graph(g, outdir / "graph_network_thumbs.png", title=title, thumbs=thumbs)
 
     # substrate x intermediate energy map (one row per substrate; here 1 substrate)
     cols = results.pathway

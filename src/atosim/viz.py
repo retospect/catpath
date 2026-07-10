@@ -10,10 +10,26 @@ matplotlib.use("Agg")  # headless / container-safe
 import matplotlib.pyplot as plt  # noqa: E402
 import networkx as nx  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage  # noqa: E402
 
 
-def draw_graph(g: nx.DiGraph, path: str | Path, title: str = "Reaction graph") -> None:
-    """Layered energy-ordered layout with barrier-labelled edges."""
+def _place_thumbs(ax, positions: dict, thumbs: dict, zoom: float = 0.42) -> None:
+    """Overlay structure thumbnails at the given {node: (x, y)} positions."""
+    for name, xy in positions.items():
+        arr = thumbs.get(name)
+        if arr is not None:
+            ab = AnnotationBbox(OffsetImage(arr, zoom=zoom), xy, frameon=False,
+                                pad=0, zorder=5)
+            ax.add_artist(ab)
+
+
+def draw_graph(g: nx.DiGraph, path: str | Path, title: str = "Reaction graph",
+               thumbs: dict | None = None) -> None:
+    """Layered energy-ordered layout with barrier-labelled edges.
+
+    When ``thumbs`` (a {node: RGBA array} map) is given, structure thumbnails are
+    overlaid on the nodes.
+    """
     # x by topological order, y by relative energy -> reads like a profile.
     try:
         order = list(nx.topological_sort(g))
@@ -40,9 +56,11 @@ def draw_graph(g: nx.DiGraph, path: str | Path, title: str = "Reaction graph") -
         for u, v, d in g.edges(data=True) if d.get("kind") != "supply"
     }
     nx.draw_networkx_edge_labels(g, pos, edge_labels=elabels, ax=ax, font_size=8)
+    if thumbs:
+        _place_thumbs(ax, pos, thumbs, zoom=0.5)
     ax.set_ylabel("relative energy (eV)")
     ax.set_title(title)
-    ax.margins(0.15)
+    ax.margins(0.2)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -62,7 +80,7 @@ def _hump(x0, y0, x1, y1, y_peak, n=40):
 
 def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
                  caption: str | None = None, show_caption: bool = True,
-                 png_meta: dict | None = None) -> None:
+                 png_meta: dict | None = None, thumbs: dict | None = None) -> None:
     """Reaction-coordinate energy diagram.
 
     Each species is a bold horizontal level line labelled with its name; each
@@ -126,6 +144,14 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
                                 xytext=(0, 5), textcoords="offset points",
                                 ha="center", fontsize=7, color=color)
         ax.plot([], [], color=color, lw=3, label=" -> ".join(nodes))
+
+    if thumbs:  # one thumbnail per state, above its (first) level line
+        placed: dict = {}
+        for pi, nodes in enumerate(paths):
+            for i, n in enumerate(nodes):
+                if n not in placed:
+                    placed[n] = (i, g.nodes[n]["rel_energy"])
+        _place_thumbs(ax, placed, thumbs, zoom=0.33)
 
     ax.set_xlabel("reaction coordinate")
     ax.set_ylabel("relative energy (eV)")
