@@ -1,0 +1,30 @@
+# NO reduction to ammonia (NO -> NH3) on Pd(111).
+# Dev/demo uses EMT (fast, qualitative). Switch mlip.backend to "mace" for a real
+# ML potential (near-DFT accuracy) on the GB10 GPU.
+name: no_to_nh3_pd
+substrate: "NO"      # quote! bare NO is YAML boolean false
+target: "NH3"
+network: ammonia     # ammonia | branching | oxidation
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: emt        # emt | mace | fairchem
+  model: medium       # mace foundation model size (small|medium|large)
+  device: cuda        # used only by mace/fairchem
+
+search:
+  neb_images: 5
+  fmax: 0.05
+  max_steps: 200
+  neb_fmax: 0.1
+  neb_max_steps: 80
+  seeds: [0, 1, 2]
+  rmsd_thresh: 0.7
+  energy_thresh: 0.05
+
+outdir: runs

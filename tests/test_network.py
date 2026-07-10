@@ -1,5 +1,6 @@
 from atosim.config import SlabConfig
 from atosim.network import (
+    build_ammonia_network,
     build_branching_network,
     build_network,
     build_oxidation_network,
@@ -31,9 +32,23 @@ def test_branching_order_starts_at_root():
     assert set(order) == set(net.states())
 
 
+def test_ammonia_network_reaches_nh3():
+    net = build_ammonia_network(SlabConfig(size=(2, 2, 3)))
+    states = set(net.states())
+    # dissociative hydrogenation chain to ammonia
+    assert {"NO", "N+O", "N+H", "NH", "NH+H", "NH2", "NH2+H", "NH3"} <= states
+    # NH3 is a leaf (terminal product)
+    order = net.order()
+    assert order[0] == "NO"
+    assert "NH3" in order
+    # reduction fork present
+    assert [s.reactant.name for s in net.steps].count("NO+H") == 2
+
+
 def test_all_steps_atom_conserving():
-    """NEB requires reactant/product to have identical atoms (both networks)."""
-    for builder in (build_oxidation_network, build_branching_network):
+    """NEB requires reactant/product to have identical atoms (all networks)."""
+    for builder in (build_oxidation_network, build_branching_network,
+                    build_ammonia_network):
         net = builder(SlabConfig(size=(2, 2, 3)))
         slab = net.slab()
         for step in net.steps:

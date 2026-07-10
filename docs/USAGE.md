@@ -78,6 +78,28 @@ uv sync --extra mace
 `fairchem` (Open Catalyst) models are purpose-built for adsorbates on metal
 surfaces and are the recommended production choice for the NO/Pd chemistry.
 
+### GPU on the DGX Spark / GB10 (Blackwell, sm_121)
+
+torch's `cu128` aarch64 wheel works for plain tensor ops, but MACE/e3nn trigger a
+runtime **nvrtc JIT** compile that fails on the GB10 with:
+
+```
+nvrtc: error: invalid value for --gpu-architecture (-arch)
+```
+
+`sm_121` support first shipped in CUDA **12.9**, while the wheel bundles nvrtc
+12.8. Fix (already pinned in the `mace` extra) — upgrade just the nvrtc package;
+its soname `libnvrtc.so.12` is stable across 12.x so torch loads the newer one:
+
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
+uv pip install mace-torch "nvidia-cuda-nvrtc-cu12>=12.9"
+```
+
+Then set `mlip.backend: mace`, `mlip.device: cuda`. Note: for small slabs (~40
+atoms) CPU MACE can be *faster* than GPU due to launch overhead; GPU wins as the
+cell grows. Use `default_dtype=float64` (the code does) for geometry opt/NEB.
+
 ## Reproducibility
 
 Every run writes `config.snapshot.yaml`. Same config + same seeds → identical

@@ -148,7 +148,61 @@ def _NOH() -> StateSpec:  # H bound to O
     return StateSpec("NOH", "NOH", [
         {"symbol": "N", "site": "fcc", "height": 1.8},
         {"symbol": "O", "site": "fcc", "height": 3.0},
-        {"symbol": "H", "site": "fcc", "height": 4.0},  # atop the O
+        {"symbol": "H", "site": "fcc", "height": 3.6},  # atop the O
+    ])
+
+
+# --- ammonia (NO reduction) states: N* hydrogenation chain -------------------
+
+def _N() -> StateSpec:
+    return StateSpec("N", "N", [{"symbol": "N", "site": "fcc", "height": 1.6}])
+
+
+def _N_H() -> StateSpec:  # N* + H*
+    return StateSpec("N+H", "N", [
+        {"symbol": "N", "site": "fcc", "height": 1.6},
+        {"symbol": "H", "site": "hcp", "height": 1.1, "dx": 2.2},
+    ])
+
+
+def _NH() -> StateSpec:
+    return StateSpec("NH", "NH", [
+        {"symbol": "N", "site": "fcc", "height": 1.7},
+        {"symbol": "H", "site": "fcc", "height": 2.8},
+    ])
+
+
+def _NH_H() -> StateSpec:  # NH* + H*
+    return StateSpec("NH+H", "NH", [
+        {"symbol": "N", "site": "fcc", "height": 1.7},
+        {"symbol": "H", "site": "fcc", "height": 2.8},
+        {"symbol": "H", "site": "hcp", "height": 1.1, "dx": 2.2},
+    ])
+
+
+def _NH2() -> StateSpec:
+    return StateSpec("NH2", "NH2", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "H", "site": "fcc", "height": 2.8, "dx": 0.9, "dy": 0.5},
+        {"symbol": "H", "site": "fcc", "height": 2.8, "dx": -0.9, "dy": 0.5},
+    ])
+
+
+def _NH2_H() -> StateSpec:  # NH2* + H*
+    return StateSpec("NH2+H", "NH2", [
+        {"symbol": "N", "site": "fcc", "height": 1.8},
+        {"symbol": "H", "site": "fcc", "height": 2.8, "dx": 0.9, "dy": 0.5},
+        {"symbol": "H", "site": "fcc", "height": 2.8, "dx": -0.9, "dy": 0.5},
+        {"symbol": "H", "site": "hcp", "height": 1.1, "dx": 2.4},
+    ])
+
+
+def _NH3() -> StateSpec:
+    return StateSpec("NH3", "NH3", [
+        {"symbol": "N", "site": "fcc", "height": 2.0},
+        {"symbol": "H", "site": "fcc", "height": 2.9, "dx": 1.0, "dy": 0.0},
+        {"symbol": "H", "site": "fcc", "height": 2.9, "dx": -0.5, "dy": 0.87},
+        {"symbol": "H", "site": "fcc", "height": 2.9, "dx": -0.5, "dy": -0.87},
     ])
 
 
@@ -179,9 +233,39 @@ def build_branching_network(slab_cfg: SlabConfig) -> Network:
     )
 
 
-def build_network(slab_cfg: SlabConfig, kind: str = "branching") -> Network:
-    if kind == "oxidation":
-        return build_oxidation_network(slab_cfg)
-    if kind == "branching":
-        return build_branching_network(slab_cfg)
-    raise ValueError(f"unknown network kind: {kind!r}")
+def build_ammonia_network(slab_cfg: SlabConfig) -> Network:
+    """NO reduction to ammonia, rooted at adsorbed NO.
+
+        dissociation:   NO -> N + O
+        hydrogenation:  N -(+H*)-> N+H -> NH -(+H*)-> NH+H -> NH2 -(+H*)-> NH2+H -> NH3
+        associative:    NO -(+H*)-> NO+H -> HNO   (fork)
+                                    NO+H -> NOH
+    """
+    return Network(
+        slab_cfg,
+        steps=[
+            StepSpec("NO->N+O", _NO(), _N_O()),        # dissociation
+            StepSpec("N+H->NH", _N_H(), _NH()),        # hydrogenation chain
+            StepSpec("NH+H->NH2", _NH_H(), _NH2()),
+            StepSpec("NH2+H->NH3", _NH2_H(), _NH3()),
+            StepSpec("NO+H->HNO", _NO_H(), _HNO()),    # associative fork
+            StepSpec("NO+H->NOH", _NO_H(), _NOH()),
+        ],
+        links=[
+            ("NO", "NO+H"),      # +H*
+            ("N+O", "N+H"),      # O* leaves to reservoir, +H*
+            ("NH", "NH+H"),      # +H*
+            ("NH2", "NH2+H"),    # +H*
+        ],
+    )
+
+
+def build_network(slab_cfg: SlabConfig, kind: str = "ammonia") -> Network:
+    builders = {
+        "oxidation": build_oxidation_network,
+        "branching": build_branching_network,
+        "ammonia": build_ammonia_network,
+    }
+    if kind not in builders:
+        raise ValueError(f"unknown network kind: {kind!r}")
+    return builders[kind](slab_cfg)

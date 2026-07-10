@@ -37,7 +37,9 @@ def make_calculator(cfg: MLIPConfig) -> "Calculator":
     if backend == "mace":
         from mace.calculators import mace_mp  # type: ignore
 
-        return mace_mp(model=cfg.model or "medium", device=cfg.device)
+        # float64 is recommended for geometry optimization / NEB (vs float32 MD).
+        return mace_mp(model=cfg.model or "medium", device=cfg.device,
+                       default_dtype="float64")
     if backend == "fairchem":
         # fairchem >=1.0 exposes an ASE calculator factory; kept lazy on purpose.
         from fairchem.core import OCPCalculator  # type: ignore
