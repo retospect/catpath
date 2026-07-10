@@ -154,10 +154,6 @@ def _NOH() -> StateSpec:  # H bound to O
 
 # --- ammonia (NO reduction) states: N* hydrogenation chain -------------------
 
-def _N() -> StateSpec:
-    return StateSpec("N", "N", [{"symbol": "N", "site": "fcc", "height": 1.6}])
-
-
 def _N_H() -> StateSpec:  # N* + H*
     return StateSpec("N+H", "N", [
         {"symbol": "N", "site": "fcc", "height": 1.6},
@@ -233,6 +229,45 @@ def build_branching_network(slab_cfg: SlabConfig) -> Network:
     )
 
 
+# --- site isomers ("adsorbed this way and that") and the water byproduct ------
+
+def _NO_top() -> StateSpec:  # NO adsorbed at an ontop site (vs fcc hollow)
+    return StateSpec("NO@top", "NO", [
+        {"symbol": "N", "site": "ontop", "height": 1.9},
+        {"symbol": "O", "site": "ontop", "height": 3.1},
+    ])
+
+
+def _O_H() -> StateSpec:  # O* + H*
+    return StateSpec("O+H", "O", [
+        {"symbol": "O", "site": "fcc", "height": 1.5},
+        {"symbol": "H", "site": "hcp", "height": 1.1, "dx": 2.2},
+    ])
+
+
+def _OH() -> StateSpec:
+    return StateSpec("OH", "OH", [
+        {"symbol": "O", "site": "fcc", "height": 1.9},
+        {"symbol": "H", "site": "fcc", "height": 2.9},
+    ])
+
+
+def _OH_H() -> StateSpec:  # OH* + H*
+    return StateSpec("OH+H", "OH", [
+        {"symbol": "O", "site": "fcc", "height": 1.9},
+        {"symbol": "H", "site": "fcc", "height": 2.9},
+        {"symbol": "H", "site": "hcp", "height": 1.1, "dx": 2.2},
+    ])
+
+
+def _H2O() -> StateSpec:
+    return StateSpec("H2O", "O", [  # label "O" for RDKit-free display
+        {"symbol": "O", "site": "fcc", "height": 2.2},
+        {"symbol": "H", "site": "fcc", "height": 2.9, "dx": 0.9, "dy": 0.3},
+        {"symbol": "H", "site": "fcc", "height": 2.9, "dx": -0.9, "dy": 0.3},
+    ])
+
+
 def build_ammonia_network(slab_cfg: SlabConfig) -> Network:
     """NO reduction to ammonia, rooted at adsorbed NO.
 
@@ -245,17 +280,22 @@ def build_ammonia_network(slab_cfg: SlabConfig) -> Network:
         slab_cfg,
         steps=[
             StepSpec("NO->N+O", _NO(), _N_O()),        # dissociation
-            StepSpec("N+H->NH", _N_H(), _NH()),        # hydrogenation chain
+            StepSpec("NO->NO@top", _NO(), _NO_top()),  # site isomer (diffusion)
+            StepSpec("N+H->NH", _N_H(), _NH()),        # N hydrogenation chain
             StepSpec("NH+H->NH2", _NH_H(), _NH2()),
             StepSpec("NH2+H->NH3", _NH2_H(), _NH3()),
             StepSpec("NO+H->HNO", _NO_H(), _HNO()),    # associative fork
             StepSpec("NO+H->NOH", _NO_H(), _NOH()),
+            StepSpec("O+H->OH", _O_H(), _OH()),        # O -> water byproduct
+            StepSpec("OH+H->H2O", _OH_H(), _H2O()),
         ],
         links=[
             ("NO", "NO+H"),      # +H*
-            ("N+O", "N+H"),      # O* leaves to reservoir, +H*
+            ("N+O", "N+H"),      # N branch: O* to reservoir, +H*
+            ("N+O", "O+H"),      # O branch: N* to reservoir, +H*
             ("NH", "NH+H"),      # +H*
             ("NH2", "NH2+H"),    # +H*
+            ("OH", "OH+H"),      # +H*
         ],
     )
 
