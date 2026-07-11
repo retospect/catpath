@@ -7,7 +7,9 @@ from pytest import approx
 
 from atosim import pipeline
 from atosim.config import Config, MLIPConfig, SlabConfig
-from atosim.viz import _anchor_shift, _assign_columns, _ordered_names, compare_boxplot
+from atosim.viz import (
+    _anchor_shift, _assign_columns, _ordered_names, compare_barriers, compare_boxplot,
+)
 
 
 def test_interval_packing_shifts_only_on_overlap():
@@ -65,6 +67,32 @@ def _tiny_states_cfg():
     cfg.search.seeds = [0, 1]
     cfg.search.max_steps = 15
     return cfg
+
+
+def test_run_barriers_returns_per_step_ea():
+    cfg = _tiny_states_cfg()
+    cfg.search.neb_images = 2
+    cfg.search.neb_max_steps = 8
+    cfg.search.neb_retries = 0
+    data = pipeline.run_barriers(cfg, log=lambda *a, **k: None)
+    assert data["model"] == "emt" and data["steps"]
+    for s in data["steps"].values():
+        assert "reactant" in s and "product" in s
+        assert all(isinstance(b, float) for b in s["barrier"])
+
+
+def test_compare_barriers_rings_rate_limiting_step(tmp_path):
+    runs = [
+        {"model": "mace", "order": ["NO", "N+O", "NO2"],
+         "steps": {"NO->N+O": {"barrier": [0.4], "reactant": "NO", "product": "N+O"},
+                   "N+O->NO2": {"barrier": [0.9], "reactant": "N+O", "product": "NO2"}}},
+        {"model": "chgnet", "order": ["NO", "N+O", "NO2"],
+         "steps": {"NO->N+O": {"barrier": [0.7], "reactant": "NO", "product": "N+O"},
+                   "N+O->NO2": {"barrier": [0.5], "reactant": "N+O", "product": "NO2"}}},
+    ]
+    out = tmp_path / "bars.png"
+    compare_barriers(runs, out, title="t")        # mace RL = 2nd step, chgnet RL = 1st
+    assert out.exists() and out.stat().st_size > 0
 
 
 def test_run_states_substrate_reference_zeros_root():

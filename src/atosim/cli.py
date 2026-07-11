@@ -17,10 +17,13 @@ from pathlib import Path
 
 from .config import Config
 from .multi import run_multi, write_multi
-from .pipeline import aggregate_partials, run, run_one_seed, run_states, write_outputs
+from .pipeline import (
+    aggregate_partials, run, run_barriers, run_one_seed, run_states, write_outputs,
+)
 from .sweep import run_sweep, write_sweep
 
-_COMMANDS = {"run", "seed", "aggregate", "sweep", "multi", "states", "compare"}
+_COMMANDS = {"run", "seed", "aggregate", "sweep", "multi",
+             "states", "barriers", "compare"}
 
 
 def _load(args) -> Config:
@@ -89,8 +92,14 @@ def main(argv: list[str] | None = None) -> int:
                      default="formation",
                      help="formation (gas-ref, cross-model comparable) | substrate (root-relative)")
 
-    pc = sub.add_parser("compare", help="combine `states` JSONs -> box plot per state")
-    pc.add_argument("--states", nargs="+", required=True, help="states JSON files")
+    pb = sub.add_parser("barriers", parents=[common],
+                        help="run NEB for every step -> per-model barrier JSON for `compare`")
+    pb.add_argument("--out", required=True, help="barriers JSON output path")
+
+    pc = sub.add_parser("compare",
+                        help="combine `states`/`barriers` JSONs -> box plot (auto-detected)")
+    pc.add_argument("--states", nargs="+", required=True,
+                    help="states OR barriers JSON files (one per model)")
     pc.add_argument("--out", required=True, help="box-plot PNG output path")
     pc.add_argument("--title", default="State energies by model")
     pc.add_argument("--anchor", default="",
@@ -102,8 +111,13 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if args.cmd == "compare":  # no run config; just merge JSONs -> plot
-        from .viz import compare_boxplot
         runs = [json.loads(Path(f).read_text()) for f in args.states]
+        if runs and "steps" in runs[0]:            # barriers JSONs -> Ea box plot
+            from .viz import compare_barriers
+            compare_barriers(runs, args.out, title=args.title)
+            print(f"wrote barrier box plot ({len(runs)} model(s)) -> {args.out}")
+            return 0
+        from .viz import compare_boxplot
         if args.anchor.lower() == "none":
             anchor = None
         elif args.anchor:
@@ -124,6 +138,13 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.out).write_text(json.dumps(data, indent=2))
         print(f"wrote states for {data['model']} "
               f"({len(data['states'])} states, seeds={data['seeds']}) -> {args.out}")
+        return 0
+
+    if args.cmd == "barriers":
+        data = run_barriers(cfg)
+        Path(args.out).write_text(json.dumps(data, indent=2))
+        print(f"wrote barriers for {data['model']} "
+              f"({len(data['steps'])} steps, seeds={data['seeds']}) -> {args.out}")
         return 0
 
     if args.cmd == "multi":

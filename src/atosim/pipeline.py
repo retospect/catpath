@@ -191,6 +191,34 @@ def run_states(cfg: Config, log=print, reference: str = "formation") -> dict:
             "seeds": list(cfg.search.seeds), "states": per_state}
 
 
+def run_barriers(cfg: Config, log=print) -> dict:
+    """Run NEB for every elementary step and every seed -> per-step Ea samples.
+
+    Activation energies are composition-conserving (NEB runs between same-atom
+    endpoints), so they are directly comparable across potentials -- no formation
+    referencing needed.  Reuses :func:`run_one_seed` (which relaxes endpoints and
+    runs the climbing-image NEB), keeping just the barriers.
+    """
+    net = _build_net(cfg, log)
+    resolved = resolve_backend(cfg.mlip.backend)
+    tag = f"{resolved}:{cfg.mlip.model}" if cfg.mlip.model else resolved
+    steps: dict[str, dict] = {}
+    warnings: list[str] = []
+    for seed in cfg.search.seeds:
+        part = run_one_seed(cfg, seed, log=log)
+        warnings.extend(part.get("warnings", []))
+        for sname, s in part["steps"].items():
+            d = steps.setdefault(sname, {"barrier": [], "delta_e": [],
+                                         "reactant": s["reactant"], "product": s["product"]})
+            if s["barrier"] is not None:
+                d["barrier"].append(s["barrier"])
+            if s["delta_e"] is not None:
+                d["delta_e"].append(s["delta_e"])
+    return {"model": tag, "network": cfg.network, "substrate": cfg.substrate,
+            "target": cfg.target, "order": net.order(),
+            "seeds": list(cfg.search.seeds), "steps": steps, "warnings": warnings}
+
+
 def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None) -> dict:
     """Run the whole network for a single seed -> a JSON-serialisable partial.
 

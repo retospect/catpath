@@ -371,3 +371,186 @@ def compare_boxplot(runs: list[dict], path: str | Path,
     fig.tight_layout()
     fig.savefig(path, dpi=150, facecolor="#fcfcfb")
     plt.close(fig)
+
+
+# --- cross-model barrier (activation-energy) comparison ----------------------
+
+def compare_barriers(runs: list[dict], path: str | Path,
+                     title: str = "Barriers by model") -> None:
+    """Per-step box + per-model dots of activation energy Ea.
+
+    ``runs`` is a list of ``{"model": tag, "steps": {name: {"barrier": [...],
+    "reactant": r, "product": p}}, "order": [...]}``.  Ea is composition-conserving
+    so it needs no referencing.  Steps run left-to-right in reaction order, boxes
+    are narrow, and each model's **rate-limiting** step (its largest Ea) is ringed
+    -- so a bottleneck that moves between models is visible at a glance.
+    """
+    idx = {n: i for i, n in enumerate(next((r["order"] for r in runs if r.get("order")), []))}
+    meta: dict[str, tuple] = {}
+    for r in runs:
+        for sn, s in r["steps"].items():
+            meta.setdefault(sn, (s.get("reactant", ""), s.get("product", "")))
+    stepnames: list[str] = []
+    for r in runs:
+        for sn in r["steps"]:
+            if sn not in stepnames:
+                stepnames.append(sn)
+    stepnames.sort(key=lambda sn: (idx.get(meta[sn][1], 1 << 30),
+                                   idx.get(meta[sn][0], 1 << 30), sn))
+    samples = {sn: [(r["model"], v) for r in runs
+                    for v in r["steps"].get(sn, {}).get("barrier", [])]
+               for sn in stepnames}
+    stepnames = [sn for sn in stepnames if samples[sn]]
+    if not stepnames:
+        raise ValueError("no barrier samples to plot")
+
+    models: list[str] = []
+    for r in runs:
+        if r["model"] not in models:
+            models.append(r["model"])
+    # each model's rate-limiting step = its largest mean Ea
+    mean_ea: dict[tuple, float] = {}
+    for sn in stepnames:
+        by_model: dict[str, list[float]] = {}
+        for m, v in samples[sn]:
+            by_model.setdefault(m, []).append(v)
+        for m, vs in by_model.items():
+            mean_ea[(m, sn)] = sum(vs) / len(vs)
+    rate_limit = {m: max((sn for sn in stepnames if (m, sn) in mean_ea),
+                         key=lambda sn: mean_ea[(m, sn)], default=None) for m in models}
+
+    spares: dict = {}
+    fig, ax = plt.subplots(figsize=(max(5, 0.6 * len(stepnames) + 2.5),
+                                    max(3.5, 4.2)))
+    half = 0.20                                     # narrow boxes
+    for i, sn in enumerate(stepnames):
+        v = np.array([val for _, val in samples[sn]], float)
+        q1, med, q3 = np.percentile(v, [25, 50, 75])
+        lo, hi = v.min(), v.max()
+        ax.add_patch(plt.Rectangle((i - half, q1), 2 * half, max(q3 - q1, 1e-9),
+                                   facecolor="#f0f0ee", edgecolor="#b8b7b2",
+                                   linewidth=1.0, zorder=1))
+        ax.plot([i - half, i + half], [med, med], color="#6b6a66", lw=1.4, zorder=2)
+        ax.plot([i, i], [lo, q1], color="#b8b7b2", lw=1.0, zorder=1)
+        ax.plot([i, i], [q3, hi], color="#b8b7b2", lw=1.0, zorder=1)
+        by_model = {}
+        for m, val in samples[sn]:
+            by_model.setdefault(m, []).append(val)
+        for j, m in enumerate([mm for mm in models if mm in by_model]):
+            n = sum(1 for mm in models if mm in by_model)
+            jx = i + ((j + 0.5) / n - 0.5) * (1.6 * half)
+            val = sum(by_model[m]) / len(by_model[m])
+            col = _model_color(m, spares)
+            ax.plot(jx, val, "o", ms=6, color=col, mec="#fcfcfb", mew=1.2, zorder=4)
+            if rate_limit.get(m) == sn:            # ring the model's rate-limiting step
+                ax.plot(jx, val, "o", ms=13, mfc="none", mec=col, mew=1.8, zorder=5)
+
+    handles = [plt.Line2D([0], [0], marker="o", ls="", ms=7,
+                          color=_model_color(mm, spares), mec="#fcfcfb", mew=1.2,
+                          label=mm) for mm in models]
+    handles.append(plt.Line2D([0], [0], marker="o", ls="", ms=11, mfc="none",
+                              mec="#6b6a66", mew=1.8, label="rate-limiting (max Ea)"))
+    ax.legend(handles=handles, loc="best", framealpha=0.9, fontsize=8)
+    ax.set_xticks(range(len(stepnames)))
+    ax.set_xticklabels(stepnames, rotation=40, ha="right", fontsize=6.5)
+    ax.set_xlim(-0.8, len(stepnames) - 0.2)
+    ax.set_ylim(bottom=min(0.0, ax.get_ylim()[0]))
+    ax.set_ylabel("activation energy Ea (eV)")
+    ax.set_xlabel("elementary step (reaction order)")
+    ax.set_title(title)
+    ax.grid(axis="y", color="#e8e8e6", lw=0.8, zorder=0)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor="#fcfcfb")
+    plt.close(fig)
+
+
+# --- absolute transition-state heights (the "highest point") -----------------
+
+def compare_ts_heights(barrier_runs: list[dict], state_runs: list[dict],
+                       path: str | Path, anchor: str | None = None,
+                       title: str = "Transition-state heights by model") -> None:
+    """Plot each step's transition state on a common (anchored) energy scale and
+    ring each model's GLOBAL peak -- the true "highest point" of the landscape,
+    which can sit on different steps for different models.
+
+    ``TS_height = E_form(reactant, anchored) + Ea(step)`` combines the formation
+    energies (``state_runs``) with the barriers (``barrier_runs``); both are keyed
+    by model tag.  ``anchor`` defaults to the substrate (first state in order).
+    """
+    forms = {r["model"]: r for r in state_runs}
+    order = next((r["order"] for r in barrier_runs if r.get("order")), [])
+    idx = {n: i for i, n in enumerate(order)}
+    if anchor is None:
+        anchor = order[0] if order else None
+
+    def anchored_form(model: str, state: str):
+        st = forms.get(model, {}).get("states", {})
+        if state not in st or not st[state]:
+            return None
+        base = st.get(anchor, [0.0])
+        return sum(st[state]) / len(st[state]) - sum(base) / len(base)
+
+    meta: dict[str, tuple] = {}
+    for r in barrier_runs:
+        for sn, s in r["steps"].items():
+            meta.setdefault(sn, (s.get("reactant", ""), s.get("product", "")))
+    # per model: TS height for every step it has a barrier + a reactant energy for
+    heights: dict[str, dict[str, float]] = {}
+    models: list[str] = []
+    for r in barrier_runs:
+        m = r["model"]
+        if m not in models:
+            models.append(m)
+        for sn, s in r["steps"].items():
+            ea = s.get("barrier") or []
+            fr = anchored_form(m, meta[sn][0])
+            if ea and fr is not None:
+                heights.setdefault(m, {})[sn] = fr + sum(ea) / len(ea)
+
+    stepnames = [sn for sn in sorted(meta, key=lambda s: (idx.get(meta[s][1], 1 << 30),
+                                                          idx.get(meta[s][0], 1 << 30), s))
+                 if any(sn in heights.get(m, {}) for m in models)]
+    peak = {m: max(heights.get(m, {}), key=lambda s: heights[m][s], default=None)
+            for m in models}
+
+    spares: dict = {}
+    fig, ax = plt.subplots(figsize=(max(5, 0.62 * len(stepnames) + 2.5), 4.4))
+    half = 0.20
+    for i, sn in enumerate(stepnames):
+        vals = [(m, heights[m][sn]) for m in models if sn in heights.get(m, {})]
+        ys = [v for _, v in vals]
+        if len(ys) > 1:
+            ax.add_patch(plt.Rectangle((i - half, min(ys)), 2 * half,
+                                       max(max(ys) - min(ys), 1e-9),
+                                       facecolor="#f0f0ee", edgecolor="#b8b7b2",
+                                       linewidth=1.0, zorder=1))
+        for j, (m, y) in enumerate(vals):
+            jx = i + ((j + 0.5) / len(vals) - 0.5) * (1.6 * half)
+            col = _model_color(m, spares)
+            ax.plot(jx, y, "o", ms=6, color=col, mec="#fcfcfb", mew=1.2, zorder=4)
+            if peak.get(m) == sn:                  # ring this model's global peak
+                ax.plot(jx, y, "*", ms=16, mfc=col, mec="#0b0b0b", mew=0.8, zorder=6)
+
+    handles = [plt.Line2D([0], [0], marker="o", ls="", ms=7,
+                          color=_model_color(mm, spares), mec="#fcfcfb", mew=1.2,
+                          label=mm) for mm in models]
+    handles.append(plt.Line2D([0], [0], marker="*", ls="", ms=13, mfc="#6b6a66",
+                              mec="#0b0b0b", mew=0.8, label="highest point (per model)"))
+    ax.legend(handles=handles, loc="best", framealpha=0.9, fontsize=8)
+    ax.axhline(0.0, color="#b8b7b2", lw=1.0, ls="--", zorder=0)
+    ax.set_xticks(range(len(stepnames)))
+    ax.set_xticklabels(stepnames, rotation=40, ha="right", fontsize=6.5)
+    ax.set_xlim(-0.8, len(stepnames) - 0.2)
+    ax.set_ylabel(f"transition-state energy above {anchor} (eV)")
+    ax.set_xlabel("elementary step (reaction order)")
+    ax.set_title(title)
+    ax.grid(axis="y", color="#e8e8e6", lw=0.8, zorder=0)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor="#fcfcfb")
+    plt.close(fig)
