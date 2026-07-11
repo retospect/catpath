@@ -11,6 +11,7 @@ tiny reagent isn't lost in a sea of metal.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -115,11 +116,22 @@ def _write_pov_scene(sub, rotation: str, window: float, n_ads: int,
 
 def _pov_view_array(sub, rotation: str, window: float, n_ads: int,
                     width: int, bonds: bool) -> np.ndarray:
-    """Ray-trace one view to an RGBA uint8 array."""
+    """Ray-trace one view to an RGBA uint8 array.
+
+    We invoke ``povray`` ourselves with ``cwd`` set to the scene directory:
+    ASE writes ``Input_File_Name=scene.pov`` as a bare name into the .ini, so
+    POV-Ray only finds it (and writes the output PNG) when run from that dir.
+    """
     with tempfile.TemporaryDirectory() as td:
-        pov = Path(td) / "scene.pov"
-        inputs = _write_pov_scene(sub, rotation, window, n_ads, pov, width, bonds)
-        png = inputs.render(clean_up=False)
+        td = Path(td)
+        pov = td / "scene.pov"
+        _write_pov_scene(sub, rotation, window, n_ads, pov, width, bonds)
+        proc = subprocess.run(["povray", pov.with_suffix(".ini").name],
+                              cwd=td, capture_output=True, text=True)
+        png = pov.with_suffix(".png")
+        if proc.returncode != 0 or not png.is_file():
+            raise RuntimeError(
+                f"povray failed (rc={proc.returncode}):\n{proc.stderr[-1500:]}")
         arr = mpimg.imread(str(png))
     if arr.ndim == 3 and arr.shape[-1] == 3:  # opaque -> add full alpha
         arr = np.dstack([arr, np.ones(arr.shape[:2])])
