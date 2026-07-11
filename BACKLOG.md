@@ -17,11 +17,13 @@ priority-ordered within sections.
   `(substrate, target, network, reagents)` specs from `substrates:` and stacks
   them into one union-column energy map (NaN where a state is absent). See
   `multi.py`, `examples/multi_substrate.yaml`, `test_multi.py`.
-- [ ] **(b) Intermediate autodetection** — the big one. Rule-guided explorer:
-  apply reaction templates / graph-rewrite rules to generate intermediates,
-  prune (valence/charge/reactive-distance/rough-energy), expand around best
-  paths. Replaces hand-curated `network.py` templates. This is the original spec
-  vision, currently NOT implemented.
+- [x] **(b) Intermediate autodetection** — `network: auto` (`src/atosim/explore.py`).
+  Rule-guided explorer over a molecular graph of the adsorbate: dissociate a
+  heavy–heavy bond, supply a reagent adatom, bond it. Prunes by valence + atom
+  budget + reachability to the target. Provably acyclic; step endpoints share an
+  element ordering so NEB interpolates. Reagents default to target-minus-substrate.
+  Verified end-to-end on EMT (NO→NH3, 26 states/23 steps). See
+  `examples/auto_ammonia.yaml`, `tests/test_explore.py`. STILL OPEN below.
 
 ## Packaging & release ("ready for GitHub")
 - [ ] **Pick a better project name** before shipping to PyPI (atosim is a
@@ -54,6 +56,14 @@ priority-ordered within sections.
 - [ ] Tighten thumbnail zoom / emphasize reagent atoms (currently small vs slab).
 
 ## Physics / method
+- [ ] **`network: auto` geometry tuning** — materialised endpoints are heuristic
+  (anchor + fanned substituents at fixed heights). They relax fine but NEB
+  convergence is looser than the curated templates. Improve: element-pair bond
+  lengths, better multi-fragment separation, site selection (fcc/hcp/bridge)
+  instead of all-fcc, and per-element anchor heights from covalent radii.
+- [ ] **`network: auto` scale controls** — expose `max_extra` (atom budget) and
+  a max-states cap in config; optional rough-energy pruning to keep only the
+  lowest-barrier branches (the explorer currently keeps every path to target).
 - [ ] **NEB auto-retry** — on non-convergence, retry with more images/steps or
   a different interpolation before reporting a (spurious) barrier.
 - [ ] **Strain sensitivity study** — option to vary lattice constant and measure

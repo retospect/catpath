@@ -358,7 +358,18 @@ def filter_by_reagents(net: Network, reagents: list[str]) -> Network:
 
 
 def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
-                  reagents: list[str] | None = None) -> Network:
+                  reagents: list[str] | None = None,
+                  substrate: str = "NO", target: str | None = None) -> Network:
+    """Build a reaction network.
+
+    ``kind="auto"`` autodetects the intermediates from ``substrate`` -> ``target``
+    (rule-guided; see :mod:`atosim.explore`); the curated template kinds ignore
+    ``substrate``/``target`` and are filtered by ``reagents`` as before.
+    """
+    if kind == "auto":
+        from .explore import build_auto_network
+        return build_auto_network(slab_cfg, substrate=substrate,
+                                  target=target or substrate, reagents=reagents)
     builders = {
         "oxidation": build_oxidation_network,
         "branching": build_branching_network,

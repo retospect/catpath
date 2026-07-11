@@ -7,7 +7,7 @@ honest status of each "how many / which" axis you might want to control.
 name: nh3_run                # output folder name (runs/<name>/)
 substrate: "NO"              # starting species label (QUOTE it — bare NO = YAML false)
 target: "NH3"                # ending species label
-network: ammonia             # which reaction network template (see §Intermediates)
+network: ammonia             # ammonia|branching|oxidation (curated) OR auto (see §Intermediates)
 reagents: ["H"]              # WHICH adatoms are available (filters branches) -> see §Reagents
                              #   omit for the full template; [] = reagent-free (dissociation) only
 
@@ -76,10 +76,11 @@ drops the reduction fork; `["H"]` does the reverse. Override at the CLI with
 `--reagents H,O` (empty string `--reagents ""` = `[]`). This does **not** invent
 new intermediates — it gates the curated ones by available reagent.
 
-## §Intermediates — curated templates, NOT autodetected ⚠️
-**We do not autodetect intermediates.** They are **curated** in
-`src/atosim/network.py` as three hand-built templates:
+## §Intermediates — curated templates OR autodetected ✅
+Two ways to get a network. **Curated** templates in `src/atosim/network.py` are
+hand-built and tuned; **`network: auto`** derives the intermediates from rules.
 
+### Curated templates
 | `network:` | states | routes |
 |---|---|---|
 | `ammonia` (default) | 16 | dissociation, N-hydrogenation → NH₃, water branch, HNO/NOH fork, a site isomer |
@@ -87,10 +88,38 @@ new intermediates — it gates the curated ones by available reagent.
 | `oxidation` | 4 | linear NO→NO₂→NO₃ |
 
 To add/adjust intermediates you edit that file (add a `StateSpec` and a
-`StepSpec`). The original vision of **rule-guided automatic** intermediate
-generation (apply reaction templates / graph-rewrite rules, prune, expand) is
-**not implemented** — it's the biggest open design item. What exists instead is
-reliable, inspectable, hand-curated networks.
+`StepSpec`). Geometries are hand-placed and tuned.
+
+### `network: auto` — rule-guided autodetection
+Set `network: auto` and atosim **generates** the intermediates from
+`substrate` → `target` (see `src/atosim/explore.py`). It applies three
+elementary graph-rewrite rules to a molecular graph of the adsorbate:
+
+- **dissociate** (barriered step) — break one heavy–heavy bond; the byproduct
+  rides along as a co-adsorbed spectator (surface mass is conserved).
+- **supply** (barrierless link) — stage one reagent adatom (`+H*`/`+O*`).
+- **react** (barriered step) — bond the staged reagent to an atom with spare
+  valence.
+
+These compose into dissociation, hydrogenation chains, the associative HNO/NOH
+fork and the water branch — the same routes as the curated `ammonia` template,
+but *derived*. It then prunes by valence, an atom budget, and keeps only states
+on a path from substrate to target. The result is provably a DAG, and every
+reaction step's endpoints share an element ordering so NEB can interpolate.
+
+```yaml
+substrate: "NO"
+target: "NH3"
+network: auto      # reagents optional: derived as target-minus-substrate ({H} here)
+```
+
+`reagents:` is optional under `auto` — if omitted it defaults to the elements
+the target needs more of than the substrate (NO→NH₃ ⇒ `{H}`; NO→NO₃ ⇒ `{O}`).
+Pass it explicitly to restrict branches (e.g. `reagents: ["H"]`). Caveat: auto
+geometries are heuristic (anchor + fanned substituents, then relaxed), so a
+curated template still gives cleaner NEB endpoints for a production run; `auto`
+is for **discovery/coverage** of the pathway space. Example:
+`examples/auto_ammonia.yaml`.
 
 ## §Substrates — multi-substrate via `atosim multi` ✅
 Give `substrates:` a list of **spec dicts** (`{substrate, target, network,
@@ -130,7 +159,7 @@ to matplotlib** — the run never fails. Override at the CLI is via the config
 | Seeds (how many / which) | `search.seeds: [...]` | ✅ first-class |
 | Models (how many / which) | `mlip.models: [...]` | ✅ first-class |
 | Reagents (which) | `reagents: [...]` (filters branches) | ✅ first-class |
-| Intermediates | `network:` template + editing `network.py` | ⚠️ curated, **not** autodetected |
+| Intermediates | `network:` template, or `network: auto` (rule-guided) | ✅ curated **and** autodetected |
 | Substrates (how many) | `substrates: [...]` + `atosim multi` | ✅ multi-substrate |
 | Surface / lattice | `slab:` block (auto-relaxed) | ✅ first-class |
 | Rendering | `render.backend: matplotlib\|povray` | ✅ first-class (povray optional) |

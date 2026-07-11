@@ -8,6 +8,7 @@ A run is one YAML file (see [`examples/no_to_no3_pd.yaml`](../examples/no_to_no3
 name: no_to_no3_pd
 substrate: "NO"      # NOTE: quote chemical labels — bare NO is YAML boolean false
 target: "NO3"
+network: ammonia     # curated: ammonia|branching|oxidation — or `auto` to autodetect
 slab:
   element: Pd
   size: [3, 3, 4]    # nx, ny, layers
@@ -62,7 +63,7 @@ seed re-runs on its own; unchanged seeds are cached.
 | Want to… | Edit |
 |---|---|
 | Add an MLIP backend | `calculators.make_calculator` (add an `elif`) |
-| Add a reaction / intermediate | `network.build_network` (add a `StepSpec`) |
+| Add a reaction / intermediate | `network.build_network` (add a `StepSpec`), or `network: auto` to autodetect them (`explore.py`) |
 | Change adsorption sites / poses | `structures.SITE_NAMES`, `poses`, `place_fragments` |
 | Tune convergence criteria | `relax.relax`, `config.SearchConfig` |
 | Change validation thresholds | `validate.geometry_ok`, `config.SearchConfig` |

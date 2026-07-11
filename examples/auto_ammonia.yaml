@@ -1,0 +1,25 @@
+# Autodetected reaction network (network: auto).
+#
+# Instead of a hand-curated template, atosim GENERATES the intermediates by
+# applying elementary rules (dissociate a bond, supply a reagent adatom, bond
+# it) to a molecular graph of the adsorbate, then keeps only the states on a
+# path from the substrate to the target.  See docs/CONFIG.md 'Intermediates'.
+#
+# reagents are OPTIONAL here: if omitted they are derived from the chemistry
+# (target minus substrate), so NO -> NH3 uses only H automatically.
+name: nh3_auto
+substrate: "NO"
+target: "NH3"
+network: auto
+
+slab:
+  element: Pd
+  size: [3, 3, 4]
+  vacuum: 10.0
+  fix_layers: 2
+
+mlip:
+  backend: emt
+
+search:
+  seeds: [0, 1, 2]
