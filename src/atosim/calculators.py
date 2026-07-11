@@ -105,7 +105,7 @@ def _load(backend: str, cfg: MLIPConfig):
             from fairchem.core import FAIRChemCalculator, pretrained_mlip
 
             predictor = pretrained_mlip.get_predict_unit(
-                cfg.model or "uma-s-1", device=cfg.device)
+                cfg.model or "uma-s-1p1", device=cfg.device)
             return FAIRChemCalculator(predictor, task_name=cfg.task or "oc20")
         if backend == "grace":
             from tensorpotential.calculator import grace_fm
