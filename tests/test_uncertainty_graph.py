@@ -1,7 +1,5 @@
 import json
 
-import numpy as np
-
 from atosim.graph import build_graph, to_csv, to_json
 from atosim.uncertainty import Estimate, aggregate, rankings_consistent
 

@@ -3,7 +3,7 @@
 import numpy as np
 
 from atosim.config import Config
-from atosim.neb import linear_barrier, neb_barrier
+from atosim.neb import linear_barrier
 from atosim.calculators import make_calculator
 from atosim.config import MLIPConfig, SlabConfig
 from atosim.structures import build_slab, place_fragments
