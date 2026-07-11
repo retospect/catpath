@@ -32,8 +32,14 @@ search:
   max_steps: 200
   neb_fmax: 0.1              # NEB band convergence
   neb_max_steps: 150
+  neb_retries: 1             # retry a non-converged NEB with a denser band + more steps
   rmsd_thresh: 0.7           # Å, "same structure" threshold
   energy_thresh: 0.05        # eV, spread over this -> low_confidence flag
+
+auto:                        # only used when network: auto  -> see §Intermediates
+  max_extra: 4               # reagent-atom budget = len(substrate atoms) + this
+  max_states: 600            # safety cap on how many states the explorer generates
+  prune_energy: null         # eV above root; drop rougher branches (null = keep all)
 
 substrates:                  # multi-substrate rows -> see §Substrates
   - {substrate: "NO", target: "NH3", network: ammonia}
@@ -115,11 +121,21 @@ network: auto      # reagents optional: derived as target-minus-substrate ({H} h
 
 `reagents:` is optional under `auto` — if omitted it defaults to the elements
 the target needs more of than the substrate (NO→NH₃ ⇒ `{H}`; NO→NO₃ ⇒ `{O}`).
-Pass it explicitly to restrict branches (e.g. `reagents: ["H"]`). Caveat: auto
-geometries are heuristic (anchor + fanned substituents, then relaxed), so a
-curated template still gives cleaner NEB endpoints for a production run; `auto`
-is for **discovery/coverage** of the pathway space. Example:
-`examples/auto_ammonia.yaml`.
+Pass it explicitly to restrict branches (e.g. `reagents: ["H"]`).
+
+**Scale controls** (the `auto:` block) tame the exhaustive default network:
+
+| knob | effect |
+|---|---|
+| `max_extra` | reagent-atom budget = `len(substrate atoms) + max_extra`. Lower ⇒ fewer intermediates. Must be large enough to reach the target *including co-adsorbed byproducts* — NO→NH₃ carries a spectator O, so NH₃+O needs 5 atoms ⇒ `max_extra ≥ 3` (default 4 has slack). |
+| `max_states` | hard cap on generated states (safety limit for large substrates). |
+| `prune_energy` | if set (eV), a fast deterministic pre-relax scores every state and branches more than this above the substrate are dropped, keeping only what still connects root→target. `null` keeps every path. |
+
+Geometry: auto endpoints use covalent-radius bond lengths and an upward
+substituent cone (so nothing floats off the slab), then relax — good enough that
+representative steps converge cleanly under a real NEB budget, though a curated
+template is still the tuned choice for a production run. `auto` is for
+**discovery/coverage** of the pathway space. Example: `examples/auto_ammonia.yaml`.
 
 ## §Substrates — multi-substrate via `atosim multi` ✅
 Give `substrates:` a list of **spec dicts** (`{substrate, target, network,

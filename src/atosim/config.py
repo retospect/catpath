@@ -85,10 +85,23 @@ class SearchConfig:
     max_steps: int = 200
     neb_fmax: float = 0.1  # eV/A convergence on the NEB band
     neb_max_steps: int = 80
+    neb_retries: int = 1  # on non-convergence, retry with a denser band + more steps
     seeds: list[int] = field(default_factory=lambda: [0, 1, 2])
     # similarity / acceptance thresholds
     rmsd_thresh: float = 0.7  # A
     energy_thresh: float = 0.05  # eV (~1 kcal/mol) for "same" energy
+
+
+@dataclass
+class AutoConfig:
+    """Controls for ``network: auto`` (rule-guided intermediate autodetection)."""
+
+    max_extra: int = 4  # atom budget = len(substrate atoms) + max_extra
+    max_states: int = 600  # safety cap on how many states the explorer generates
+    # rough-energy pruning: drop states whose quick (pre-relaxed) energy is more
+    # than this many eV above the substrate root, keeping only what still connects
+    # root -> target.  None disables it (keep every path to target).
+    prune_energy: float | None = None
 
 
 @dataclass
@@ -120,6 +133,7 @@ class Config:
     mlip: MLIPConfig = field(default_factory=MLIPConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     render: RenderConfig = field(default_factory=RenderConfig)
+    auto: AutoConfig = field(default_factory=AutoConfig)  # network: auto controls
     outdir: str = "runs"
 
     def __post_init__(self) -> None:
@@ -166,13 +180,14 @@ class Config:
         slab = SlabConfig(**data.pop("slab", {}))
         mlip = MLIPConfig(**data.pop("mlip", {}))
         render = RenderConfig(**data.pop("render", {}))
+        auto = AutoConfig(**data.pop("auto", {}))
         search_data = data.pop("search", {})
         if "size" in search_data:  # tolerate misplacement
             search_data.pop("size")
         search = SearchConfig(**search_data)
         # normalise tuple fields that YAML gives as lists
         slab.size = tuple(slab.size)  # type: ignore[assignment]
-        cfg = cls(slab=slab, mlip=mlip, search=search, render=render, **data)
+        cfg = cls(slab=slab, mlip=mlip, search=search, render=render, auto=auto, **data)
         if not cfg.substrates:
             cfg.substrates = [cfg.substrate]
         return cfg

@@ -65,11 +65,16 @@ priority-ordered within sections.
   converge cleanly under a real NEB budget (Ea 0.08 / 0.15 eV). NOTE: remaining
   NEB non-convergence in quick smokes is *band-budget* limited (small
   neb_images/neb_max_steps), not geometry — see "NEB auto-retry" below.
-- [ ] **`network: auto` scale controls** — expose `max_extra` (atom budget) and
-  a max-states cap in config; optional rough-energy pruning to keep only the
-  lowest-barrier branches (the explorer currently keeps every path to target).
-- [ ] **NEB auto-retry** — on non-convergence, retry with more images/steps or
-  a different interpolation before reporting a (spurious) barrier.
+- [x] **`network: auto` scale controls** — `auto:` config block exposes
+  `max_extra` (reagent-atom budget), `max_states` (hard breadth cap), and
+  `prune_energy` (deterministic rough-energy pruning that drops branches >N eV
+  above the root, keeping only what still connects root→target; skips itself if
+  it would sever the target). See `AutoConfig`, `explore.prune_by_rough_energy`,
+  `tests/test_explore.py`.
+- [x] **NEB auto-retry** — `search.neb_retries` (default 1). On non-convergence,
+  retry with a ~1.5× denser band and 2× the step budget; return the first
+  converged attempt else the most-refined one. Cut NO→NH3 EMT smoke
+  non-convergence from 14/23 → 4/23. See `neb.neb_barrier`, `tests/test_neb.py`.
 - [ ] **Strain sensitivity study** — option to vary lattice constant and measure
   how much adsorption energies shift (complements lattice relaxation).
 - [ ] **fairchem backend** — wire Open Catalyst models; compare vs MACE.

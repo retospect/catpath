@@ -160,3 +160,41 @@ def test_build_network_auto_integrates():
     net = build_network(_SLAB, "auto", substrate="NO", target="NH3")
     assert net.steps and net.order()[0] == "NO"     # root sorts first
     assert any("NH3" in n for n in net.states())     # target present
+
+
+# --- scale controls ---------------------------------------------------------
+
+def test_max_extra_bounds_the_network():
+    small = build_network(_SLAB, "auto", substrate="NO", target="NH3", max_extra=3)
+    big = build_network(_SLAB, "auto", substrate="NO", target="NH3", max_extra=4)
+    assert 0 < len(small.states()) < len(big.states())
+    for net in (small, big):                          # target still reachable
+        assert any("NH3" in n.split("+") for n in net.states())
+
+
+def test_max_states_caps_exploration():
+    nodes, edges, root, goals = explore.explore("NO", "NH3", max_states=15)
+    assert len(nodes) <= 15
+
+
+def test_rough_energy_pruning_shrinks_and_keeps_target():
+    from atosim.config import MLIPConfig
+    from atosim.calculators import make_calculator
+    full = build_network(SlabConfig(size=(2, 2, 3), vacuum=8.0),
+                         "auto", substrate="NO", target="NH3")
+    mk = lambda: make_calculator(MLIPConfig(backend="emt"))  # noqa: E731
+    pruned = explore.prune_by_rough_energy(full, mk, "NH3", threshold=0.15)
+    assert 0 < len(pruned.states()) <= len(full.states())
+    assert any("NH3" in n.split("+") for n in pruned.states())   # target survives
+    assert pruned.order()[0] == "NO"                             # root survives
+
+
+def test_prune_skips_when_it_would_sever_target():
+    from atosim.config import MLIPConfig
+    from atosim.calculators import make_calculator
+    full = build_network(SlabConfig(size=(2, 2, 3), vacuum=8.0),
+                         "auto", substrate="NO", target="NH3")
+    mk = lambda: make_calculator(MLIPConfig(backend="emt"))  # noqa: E731
+    # an impossibly tight threshold would drop everything -> pruning must bail out
+    kept = explore.prune_by_rough_energy(full, mk, "NH3", threshold=-100.0)
+    assert len(kept.states()) == len(full.states())             # unchanged

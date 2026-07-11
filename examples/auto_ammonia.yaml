@@ -23,3 +23,10 @@ mlip:
 
 search:
   seeds: [0, 1, 2]
+  neb_retries: 1        # retry a non-converged NEB with a denser band + more steps
+
+# Optional: bound / trim the autodetected network (defaults shown).
+auto:
+  max_extra: 4          # reagent-atom budget above the substrate's atom count
+  max_states: 600       # safety cap on generated states
+  prune_energy: null    # e.g. 0.3 to drop branches >0.3 eV above the root NO

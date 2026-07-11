@@ -192,7 +192,7 @@ def _default_reagents(sub: nx.Graph, tgt: nx.Graph) -> set[str]:
 
 
 def explore(substrate: str, target: str, reagents: set[str] | None = None,
-            max_extra: int = 4):
+            max_extra: int = 4, max_states: int = _MAX_STATES):
     """Breadth-first rule application from ``substrate`` toward ``target``.
 
     Returns ``(nodes, edges, root_key, goal_keys)`` where ``nodes`` maps a
@@ -214,11 +214,13 @@ def explore(substrate: str, target: str, reagents: set[str] | None = None,
     queue = [rkey]
     if _is_goal(sub_g, tgt_g):
         goals.add(rkey)
-    while queue and len(nodes) < _MAX_STATES:
+    while queue:
         skey = queue.pop(0)
         for kind, ns, meta in _successors(nodes[skey], reagents, max_atoms):
             nkey = ns.key()
             if nkey not in nodes:
+                if len(nodes) >= max_states:  # hard breadth cap: skip new states
+                    continue                  # (and the edges into them)
                 nodes[nkey] = ns
                 if _is_goal(ns.g, tgt_g):
                     goals.add(nkey)
@@ -377,16 +379,18 @@ def _materialise(g: nx.Graph) -> StateSpec:
 def build_auto_network(slab_cfg: SlabConfig, substrate: str = "NO",
                        target: str | None = None,
                        reagents: list[str] | None = None,
-                       max_extra: int = 4) -> Network:
+                       max_extra: int = 4,
+                       max_states: int = _MAX_STATES) -> Network:
     """Autodetect the reaction network from ``substrate`` -> ``target``.
 
     ``reagents`` defaults to the elements the target needs more of than the
-    substrate (e.g. NO->NH3 needs only H; NO->NO3 needs only O).
+    substrate (e.g. NO->NH3 needs only H; NO->NO3 needs only O).  ``max_extra``
+    is the reagent-atom budget and ``max_states`` caps exploration breadth.
     """
     target = target or substrate
     nodes, edges, rkey, goals = explore(
         substrate, target, set(reagents) if reagents is not None else None,
-        max_extra=max_extra)
+        max_extra=max_extra, max_states=max_states)
     keep, edges = _prune_to_target(nodes, edges, rkey, goals)
 
     specs = {k: _materialise(nodes[k].g) for k in keep}
@@ -413,3 +417,68 @@ def build_auto_network(slab_cfg: SlabConfig, substrate: str = "NO",
     # is derived from steps), matching the curated-network invariant
     links = [(a, b) for a, b in links if a in step_states and b in step_states]
     return Network(slab_cfg, steps=steps, links=links)
+
+
+def _target_state_name(target: str) -> str:
+    """State name of the pure target fragment (e.g. 'NH3') -- used to spot goal
+    states like 'NH3+O' by fragment membership."""
+    return _state_name(parse_molecule(target))
+
+
+def prune_by_rough_energy(net: Network, make_calc, target: str, threshold: float,
+                          prerelax_steps: int = 40, log=lambda *a, **k: None) -> Network:
+    """Drop states whose quick pre-relaxed energy is > ``threshold`` eV above the
+    substrate root, then keep only what still connects root -> a target state.
+
+    Deterministic (a short relax, no rattle), so every seed prunes to the SAME
+    network and the energy-map columns stay aligned.  If pruning would sever the
+    target it is skipped (returns ``net`` unchanged) with a warning -- a run must
+    always retain at least one substrate->target path.
+    """
+    from .relax import pre_relax
+    from .structures import build_slab
+
+    order = net.order()
+    if not order:
+        return net
+    root = order[0]
+    states = net.states()
+    goal_name = _target_state_name(target)
+    goals = {n for n in states if goal_name in n.split("+")}
+
+    slab = build_slab(net.slab_cfg)
+    energy: dict[str, float] = {}
+    for name, st in states.items():
+        atoms = pre_relax(st.build(slab), make_calc(), max_steps=prerelax_steps)
+        energy[name] = float(atoms.get_potential_energy())
+    e0 = energy[root]
+    keep = {n for n, e in energy.items() if e - e0 <= threshold} | {root} | goals
+
+    # restrict to states still on a root -> goal path within the kept set
+    g = nx.DiGraph()
+    g.add_nodes_from(keep)
+    for s in net.steps:
+        if s.reactant.name in keep and s.product.name in keep:
+            g.add_edge(s.reactant.name, s.product.name)
+    for a, b in net.links:
+        if a in keep and b in keep:
+            g.add_edge(a, b)
+    reach = {root} | (nx.descendants(g, root) if root in g else set())
+    to_goal: set = set()
+    for gl in goals & set(g):
+        to_goal |= {gl} | nx.ancestors(g, gl)
+    final = reach & to_goal
+
+    if not (goals & final) or root not in final:
+        log("warning: rough-energy pruning would sever the target; skipped")
+        return net
+
+    steps = [s for s in net.steps
+             if s.reactant.name in final and s.product.name in final]
+    kept = set()
+    for s in steps:
+        kept |= {s.reactant.name, s.product.name}
+    links = [(a, b) for a, b in net.links if a in kept and b in kept]
+    log(f"rough-energy pruning: kept {len(kept)}/{len(states)} states "
+        f"(<= {threshold:.2f} eV above root)")
+    return Network(net.slab_cfg, steps=steps, links=links)

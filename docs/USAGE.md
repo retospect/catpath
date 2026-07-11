@@ -24,6 +24,7 @@ search:
   max_steps: 200
   neb_fmax: 0.1      # NEB band convergence
   neb_max_steps: 80
+  neb_retries: 1     # retry a non-converged NEB with a denser band + more steps
   seeds: [0, 1, 2]   # ≥3 for a mean ± spread
   rmsd_thresh: 0.7   # Å, "same structure"
   energy_thresh: 0.05 # eV, spread tolerance → low_confidence flag

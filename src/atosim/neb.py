@@ -30,19 +30,11 @@ def _energies(images: list[Atoms]) -> list[float]:
     return [float(im.get_potential_energy()) for im in images]
 
 
-def neb_barrier(
-    reactant: Atoms,
-    product: Atoms,
-    make_calc,
-    n_images: int = 5,
-    fmax: float = 0.1,
-    max_steps: int = 100,
-    climb: bool = True,
-) -> BarrierResult:
-    """Climbing-image NEB between two *relaxed* endpoints with matching atoms."""
-    if len(reactant) != len(product):
-        raise ValueError("NEB endpoints must have identical atom counts")
-
+def _neb_attempt(
+    reactant: Atoms, product: Atoms, make_calc,
+    n_images: int, fmax: float, max_steps: int, climb: bool,
+) -> tuple[list[float], bool]:
+    """One climbing-image NEB run -> (image energies, converged)."""
     images = [reactant.copy()]
     images += [reactant.copy() for _ in range(n_images)]
     images += [product.copy()]
@@ -53,15 +45,49 @@ def neb_barrier(
               allow_shared_calculator=False)
     neb.interpolate(method="idpp")
     dyn = BFGS(neb, logfile=None)
-    converged = dyn.run(fmax=fmax, steps=max_steps)
+    converged = bool(dyn.run(fmax=fmax, steps=max_steps))
+    return _energies(images), converged
 
-    es = _energies(images)
+
+def neb_barrier(
+    reactant: Atoms,
+    product: Atoms,
+    make_calc,
+    n_images: int = 5,
+    fmax: float = 0.1,
+    max_steps: int = 100,
+    climb: bool = True,
+    retries: int = 0,
+) -> BarrierResult:
+    """Climbing-image NEB between two *relaxed* endpoints with matching atoms.
+
+    On non-convergence, retry up to ``retries`` more times, each with more images
+    (~1.5x) and twice the optimisation budget -- a denser band with more steps
+    is the usual cure for a NEB that ran out of steps or had too coarse a
+    tangent. Returns the first converged attempt, else the last (most refined)
+    one, so a barrier estimate is always reported.
+    """
+    if len(reactant) != len(product):
+        raise ValueError("NEB endpoints must have identical atom counts")
+
+    ni, ms = n_images, max_steps
+    es: list[float] = []
+    converged = False
+    attempt = 0
+    for attempt in range(1 + max(0, retries)):
+        es, converged = _neb_attempt(reactant, product, make_calc, ni, fmax, ms, climb)
+        if converged:
+            break
+        ni += max(2, ni // 2)  # ~1.5x denser band
+        ms *= 2                # and a bigger optimisation budget
+
     e_r, e_p = es[0], es[-1]
     e_ts = max(es)
+    method = "ci-neb" if attempt == 0 else f"ci-neb+retry{attempt}"
     return BarrierResult(
         e_reactant=e_r, e_product=e_p, e_ts=e_ts,
         barrier=e_ts - e_r, delta_e=e_p - e_r,
-        converged=bool(converged), method="ci-neb", images_energy=es,
+        converged=converged, method=method, images_energy=es,
     )
 
 

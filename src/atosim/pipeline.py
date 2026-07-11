@@ -44,6 +44,23 @@ def g_has_edge(edges: list[dict], a: str, b: str) -> bool:
     return any(e["reactant"] == a and e["product"] == b for e in edges)
 
 
+def _build_net(cfg: Config, log=lambda *a, **k: None) -> Network:
+    """Build the reaction network for this run.
+
+    For ``network: auto`` the exploration is bounded by ``cfg.auto`` and, if
+    ``cfg.auto.prune_energy`` is set, high-energy branches are dropped by a
+    deterministic rough-energy pass so every seed prunes to the same network.
+    """
+    net = build_network(cfg.slab, cfg.network, cfg.reagents, cfg.substrate,
+                        cfg.target, max_extra=cfg.auto.max_extra,
+                        max_states=cfg.auto.max_states)
+    if cfg.network == "auto" and cfg.auto.prune_energy is not None:
+        from .explore import prune_by_rough_energy
+        net = prune_by_rough_energy(net, lambda: make_calculator(cfg.mlip),
+                                    cfg.target, cfg.auto.prune_energy, log=log)
+    return net
+
+
 @dataclass
 class Results:
     node_energies: dict[str, Estimate] = field(default_factory=dict)
@@ -74,7 +91,7 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
     for each state is stored in it (for structure thumbnails). Kept out of the
     JSON partial since ``Atoms`` are not serialisable.
     """
-    net = build_network(cfg.slab, cfg.network, cfg.reagents, cfg.substrate, cfg.target)
+    net = _build_net(cfg, log)
     slab = net.slab()
     n_slab = slab.info["n_slab"]
 
@@ -112,6 +129,7 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
                 make_calc=lambda: make_calculator(cfg.mlip),
                 n_images=cfg.search.neb_images,
                 fmax=cfg.search.neb_fmax, max_steps=cfg.search.neb_max_steps,
+                retries=cfg.search.neb_retries,
             )
             entry["barrier"] = bar.barrier
             entry["delta_e"] = bar.delta_e
@@ -132,7 +150,7 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
     combined on a common relative scale.  The resulting spread therefore captures
     both seed and model uncertainty.
     """
-    net = build_network(cfg.slab, cfg.network, cfg.reagents, cfg.substrate, cfg.target)
+    net = _build_net(cfg)
     order = net.order()
     ref_state = order[0]
     results = Results(pathway=order, links=list(net.links))

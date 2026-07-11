@@ -23,3 +23,12 @@ def test_snapshot_roundtrip(tmp_path: Path):
     assert back.name == "x"
     assert back.target == "NO3"
     assert back.slab.element == cfg.slab.element
+
+
+def test_auto_block_parses():
+    cfg = Config.from_dict({"network": "auto",
+                            "auto": {"max_extra": 3, "prune_energy": 0.2}})
+    assert cfg.auto.max_extra == 3
+    assert cfg.auto.prune_energy == 0.2
+    assert cfg.auto.max_states == 600      # untouched default
+    assert Config().auto.prune_energy is None  # off by default
