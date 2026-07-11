@@ -56,11 +56,15 @@ priority-ordered within sections.
 - [ ] Tighten thumbnail zoom / emphasize reagent atoms (currently small vs slab).
 
 ## Physics / method
-- [ ] **`network: auto` geometry tuning** — materialised endpoints are heuristic
-  (anchor + fanned substituents at fixed heights). They relax fine but NEB
-  convergence is looser than the curated templates. Improve: element-pair bond
-  lengths, better multi-fragment separation, site selection (fcc/hcp/bridge)
-  instead of all-fcc, and per-element anchor heights from covalent radii.
+- [x] **`network: auto` geometry tuning** — materialised endpoints now use
+  covalent-radius bond lengths, an upward substituent cone (66° lean so chain
+  tips like N-O-H stay under the 3.5 Å detachment limit), covalent-radius anchor
+  heights, footprint-based fragment spacing, and distinct sites (primary at fcc,
+  co-adsorbed byproducts/staged reagents at hcp). Eliminated the spurious
+  "detached from slab" warnings; representative steps (NO+H→HNO, NH2+H+O→NH3+O)
+  converge cleanly under a real NEB budget (Ea 0.08 / 0.15 eV). NOTE: remaining
+  NEB non-convergence in quick smokes is *band-budget* limited (small
+  neb_images/neb_max_steps), not geometry — see "NEB auto-retry" below.
 - [ ] **`network: auto` scale controls** — expose `max_extra` (atom budget) and
   a max-states cap in config; optional rough-energy pruning to keep only the
   lowest-barrier branches (the explorer currently keeps every path to target).

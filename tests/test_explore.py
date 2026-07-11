@@ -113,6 +113,42 @@ def test_every_step_has_neb_compatible_endpoints():
         assert r == p, f"{s.name}: {r} != {p}"
 
 
+def test_bond_lengths_come_from_covalent_radii():
+    """A built NH3 fragment should have ~1.02 A N-H bonds (0.71 + 0.31)."""
+    net = build_network(SlabConfig(size=(3, 3, 3), vacuum=8.0),
+                        "auto", substrate="NO", target="NH3")
+    slab = build_slab(net.slab_cfg)
+    n_slab = len(slab)
+    st = next(s for n, s in net.states().items() if n.startswith("NH3"))
+    a = st.build(slab)
+    pos = a.get_positions()[n_slab:]
+    sym = a.get_chemical_symbols()[n_slab:]
+    ni = sym.index("N")
+    nh = sorted(float(np.linalg.norm(pos[ni] - pos[i]))
+                for i, s in enumerate(sym) if s == "H")[:3]
+    assert all(abs(d - explore._bond_len("N", "H")) < 0.05 for d in nh)
+
+
+def test_fragments_use_distinct_sites_and_dont_collide():
+    net = build_network(SlabConfig(size=(3, 3, 3), vacuum=8.0),
+                        "auto", substrate="NO", target="NH3")
+    slab = build_slab(net.slab_cfg)
+    n_slab = len(slab)
+    saw_multi = False
+    for name, st in net.states().items():
+        specs = st.specs
+        sites = {s.get("site", "fcc") for s in specs}
+        if "+" in name:                     # a co-adsorbed (multi-fragment) state
+            saw_multi = True
+            assert sites == {"fcc", "hcp"}  # primary at fcc, the rest at hcp
+        # no two adsorbate atoms crash together
+        ads = st.build(slab).get_positions()[n_slab:]
+        if len(ads) > 1:
+            d = np.linalg.norm(ads[:, None, :] - ads[None, :, :], axis=-1)
+            assert d[~np.eye(len(ads), dtype=bool)].min() > 0.85
+    assert saw_multi
+
+
 def test_oxidation_target_uses_oxygen_only():
     net = build_network(_SLAB, "auto", substrate="NO", target="NO3")
     # with O the only reagent, no N-H states should appear

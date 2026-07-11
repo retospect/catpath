@@ -41,6 +41,9 @@ from dataclasses import dataclass
 
 import networkx as nx
 
+import numpy as np
+from ase.data import atomic_numbers, covalent_radii
+
 from .config import SlabConfig
 from .network import Network, StateSpec, StepSpec
 
@@ -49,10 +52,31 @@ _VALENCE = {"H": 1, "O": 2, "N": 3, "C": 4, "S": 2}
 # Fixed element layout/order priority; also the per-state spec ordering that
 # guarantees NEB-compatible endpoints (see module docstring).  Lower sorts first.
 _PRIORITY = {"C": 0, "N": 1, "O": 2, "S": 3, "H": 9}
-# Anchor height (A above the surface) when an atom sits directly on the slab.
-_ANCHOR_H = {"C": 1.9, "N": 1.8, "O": 1.7, "S": 1.9, "H": 1.1}
+
+# Geometry constants (materialisation).  Endpoints only need to be non-overlapping
+# and roughly physical -- the relaxer refines them -- but covalent-radius bond
+# lengths and an upward substituent cone land closer to the true minimum, which
+# tightens NEB convergence versus flat, fixed-distance placement.
+_ADS_OFFSET = 1.15      # A: anchor height above surface, beyond its covalent radius
+_CONE_DEG = 66.0        # substituent tilt off the surface normal (degrees); a wide
+                        # lean keeps chain tips (N-O-H) under the detachment limit
+_FRAG_CLEAR = 2.0       # A: extra clearance between co-adsorbed fragment footprints
 
 _MAX_STATES = 600  # safety cap on exploration breadth
+
+
+def _cov(el: str) -> float:
+    return float(covalent_radii[atomic_numbers[el]])
+
+
+def _bond_len(a: str, b: str) -> float:
+    """Single-bond length ~ sum of covalent radii (e.g. N-H~1.0, N-O~1.4 A)."""
+    return _cov(a) + _cov(b)
+
+
+def _anchor_h(el: str) -> float:
+    """Height of a surface-anchored atom: its covalent radius + an adsorption gap."""
+    return _cov(el) + _ADS_OFFSET
 
 
 # --- molecular graphs --------------------------------------------------------
@@ -273,38 +297,73 @@ def _hill(g: nx.Graph) -> str:
                    for e in sorted(cnt, key=lambda e: _PRIORITY.get(e, 5)))
 
 
+def _fragment_geom(g: nx.Graph, comp) -> tuple[dict, int]:
+    """Local (x, y, z) per atom of ONE fragment, anchor at the xy origin.
+
+    Bond lengths come from covalent radii; substituents fan upward in a cone
+    (a lone heavy child stacks vertically, e.g. O over N in N-O).  Returns
+    ``(positions, anchor)``.
+    """
+    sub = g.subgraph(comp)
+    anchor = min(comp, key=lambda n: (_PRIORITY.get(g.nodes[n]["el"], 5),
+                                      -sub.degree(n), n))
+    pos = {anchor: np.array([0.0, 0.0, _anchor_h(g.nodes[anchor]["el"])])}
+    depth = {anchor: 0}
+    cone = math.radians(_CONE_DEG)
+    seen, queue = {anchor}, [anchor]
+    while queue:
+        p = queue.pop(0)
+        kids = [m for m in sub.neighbors(p) if m not in seen]
+        for i, m in enumerate(kids):
+            b = _bond_len(g.nodes[p]["el"], g.nodes[m]["el"])
+            # fan every substituent into an upward cone.  A wide tilt matters for
+            # chains (N-O-H): stacking bonds vertically would lift the tip past
+            # the ~3.5 A "detached from slab" limit, so we lean instead.
+            azi = 2 * math.pi * i / len(kids) + 0.7 * depth[p]
+            d = np.array([math.sin(cone) * math.cos(azi),
+                          math.sin(cone) * math.sin(azi), math.cos(cone)])
+            pos[m] = pos[p] + b * d
+            depth[m] = depth[p] + 1
+            seen.add(m)
+            queue.append(m)
+    return pos, anchor
+
+
+def _footprint(pos: dict, anchor: int) -> float:
+    a = pos[anchor][:2]
+    return max((float(np.linalg.norm(pos[n][:2] - a)) for n in pos), default=0.0)
+
+
 def _layout(g: nx.Graph) -> dict:
-    """Assign (dx, dy, height) to every atom: fragments on separate slots,
-    substituents fanned around their anchor.  Endpoints only need to be
-    non-overlapping and roughly physical -- the relaxer refines them."""
-    slots = [(0.0, 0.0), (2.6, 0.0), (-2.6, 0.0), (0.0, 2.6),
-             (0.0, -2.6), (2.6, 2.6), (-2.6, -2.6), (2.6, -2.6)]
+    """Assign (dx, dy, height, site) to every atom.
+
+    Each fragment is built with :func:`_fragment_geom`, then fragments are spaced
+    by their footprints so they cannot overlap.  The primary (largest) fragment
+    sits at an fcc hollow; co-adsorbed byproducts / staged reagents go to hcp --
+    distinct sites, matching how the curated templates stage extra adatoms.
+    """
     comps = sorted(nx.connected_components(g),
                    key=lambda c: (-len(c), sorted(g.nodes[n]["el"] for n in c)))
-    pos: dict = {}
-    for ci, comp in enumerate(comps):
-        ox, oy = slots[ci % len(slots)]
-        sub = g.subgraph(comp)
-        anchor = min(comp, key=lambda n: (_PRIORITY.get(g.nodes[n]["el"], 5),
-                                          -sub.degree(n), n))
-        pos[anchor] = (ox, oy, _ANCHOR_H.get(g.nodes[anchor]["el"], 1.7))
-        seen, queue = {anchor}, [anchor]
-        while queue:
-            p = queue.pop(0)
-            kids = [m for m in sub.neighbors(p) if m not in seen]
-            px, py, ph = pos[p]
-            for i, m in enumerate(kids):
-                ang = 2 * math.pi * i / max(1, len(kids)) + 0.4 * ph
-                pos[m] = (px + 0.95 * math.cos(ang), py + 0.95 * math.sin(ang),
-                          ph + 0.9)
-                seen.add(m)
-                queue.append(m)
-    return pos
+    geoms = [_fragment_geom(g, c) for c in comps]
+    foots = [_footprint(p, a) for p, a in geoms]
+    dirs = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0),
+            (0.7, 0.7), (-0.7, -0.7), (0.7, -0.7), (-0.7, 0.7)]
+    out: dict = {}
+    for ci, (pos, _anchor) in enumerate(geoms):
+        if ci == 0:
+            cx, cy, site = 0.0, 0.0, "fcc"
+        else:
+            gap = foots[0] + foots[ci] + _FRAG_CLEAR
+            ux, uy = dirs[(ci - 1) % len(dirs)]
+            cx, cy, site = ux * gap, uy * gap, "hcp"
+        for n, p in pos.items():
+            out[n] = (cx + float(p[0]), cy + float(p[1]), float(p[2]), site)
+    return out
 
 
 def _materialise(g: nx.Graph) -> StateSpec:
     pos = _layout(g)
-    specs = [{"symbol": g.nodes[n]["el"], "site": "fcc",
+    specs = [{"symbol": g.nodes[n]["el"], "site": pos[n][3],
               "height": round(pos[n][2], 3), "dx": round(pos[n][0], 3),
               "dy": round(pos[n][1], 3)} for n in g]
     # order by element priority -> equal-multiset states share atom ordering,
