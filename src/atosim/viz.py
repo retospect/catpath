@@ -206,3 +206,118 @@ def energy_map(
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
+
+
+# --- cross-model state-energy comparison (box + per-model dots) --------------
+
+# Fixed categorical colours (validated CVD-safe); colour follows the MODEL
+# identity, never its rank.  Extra models fall back to the ordered spares.
+_MODEL_COLORS = {"mace": "#2a78d6", "chgnet": "#1baf7a", "fairchem": "#eda100",
+                 "grace": "#4a3aa7", "emt": "#e34948"}
+_SPARE_COLORS = ["#e87ba4", "#eb6834", "#008300"]
+
+
+def _model_color(model: str, spares: dict) -> str:
+    base = model.split(":", 1)[0]
+    if base in _MODEL_COLORS:
+        return _MODEL_COLORS[base]
+    return spares.setdefault(base, _SPARE_COLORS[len(spares) % len(_SPARE_COLORS)])
+
+
+def _assign_columns(intervals: list[tuple[float, float]], pad: float):
+    """Interval partitioning: pack [lo,hi] energy spans into the fewest columns
+    so no two in a column overlap (states at distinct energies share a column;
+    clusters shift right).  Returns (column_index_per_state, n_columns)."""
+    import heapq
+
+    order = sorted(range(len(intervals)), key=lambda i: intervals[i][0])
+    heap: list[tuple[float, int]] = []  # (column top so far, column index)
+    col_of = [0] * len(intervals)
+    ncols = 0
+    for i in order:
+        lo, hi = intervals[i][0] - pad, intervals[i][1] + pad
+        if heap and heap[0][0] <= lo:          # a column has freed up -> reuse it
+            _, ci = heapq.heappop(heap)
+        else:                                  # otherwise open a new column (shift right)
+            ci, ncols = ncols, ncols + 1
+        col_of[i] = ci
+        heapq.heappush(heap, (hi, ci))
+    return col_of, ncols
+
+
+def compare_boxplot(runs: list[dict], path: str | Path,
+                    title: str = "State energies by model") -> None:
+    """Per-state box + per-model dots, laid out by an energy-interval packing.
+
+    ``runs`` is a list of ``{"model": tag, "states": {name: [values]}}`` (one per
+    model). Each state becomes a box (its pooled distribution) plus one dot per
+    sample coloured by model; y is energy relative to the substrate, and states
+    are packed into the fewest non-overlapping columns (see ``_assign_columns``).
+    """
+    # gather per-state (model, value) samples in a stable state order
+    names: list[str] = []
+    for r in runs:
+        for n in r["states"]:
+            if n not in names:
+                names.append(n)
+    samples = {n: [(r["model"], v) for r in runs for v in r["states"].get(n, [])]
+               for n in names}
+    names = [n for n in names if samples[n]]
+    if not names:
+        raise ValueError("no state samples to plot")
+
+    vals = {n: np.array([v for _, v in samples[n]], float) for n in names}
+    allv = np.concatenate(list(vals.values()))
+    span = float(allv.max() - allv.min()) or 1.0
+    pad = 0.045 * span                         # breathing room between stacked boxes
+    intervals = [(float(vals[n].min()), float(vals[n].max())) for n in names]
+    col_of, ncols = _assign_columns(intervals, pad)
+
+    spares: dict = {}
+    models = []
+    for r in runs:                             # legend order = run order
+        if r["model"] not in models:
+            models.append(r["model"])
+
+    fig, ax = plt.subplots(figsize=(max(4, 1.7 * ncols + 2.2),
+                                    max(4, 0.34 * len(names) + 2)))
+    half = 0.30                                # box half-width in column units
+    for i, n in enumerate(names):
+        x = col_of[i]
+        v = vals[n]
+        q1, med, q3 = np.percentile(v, [25, 50, 75])
+        lo, hi = v.min(), v.max()
+        # recessive box (q1-q3) + whiskers + median
+        ax.add_patch(plt.Rectangle((x - half, q1), 2 * half, max(q3 - q1, 1e-9),
+                                   facecolor="#f0f0ee", edgecolor="#b8b7b2",
+                                   linewidth=1.0, zorder=1))
+        ax.plot([x - half, x + half], [med, med], color="#6b6a66", lw=1.6, zorder=2)
+        ax.plot([x, x], [lo, q1], color="#b8b7b2", lw=1.0, zorder=1)
+        ax.plot([x, x], [q3, hi], color="#b8b7b2", lw=1.0, zorder=1)
+        # per-sample dots, jittered in x, coloured by model, 2px surface ring
+        m = len(samples[n])
+        for k, (model, val) in enumerate(samples[n]):
+            jx = x + (((k + 0.5) / m) - 0.5) * (1.5 * half)
+            ax.plot(jx, val, "o", ms=6, color=_model_color(model, spares),
+                    mec="#fcfcfb", mew=1.2, zorder=4)
+        ax.text(x, hi + pad * 0.5, n, ha="center", va="bottom",
+                fontsize=7, color="#0b0b0b", zorder=5)
+
+    handles = [plt.Line2D([0], [0], marker="o", ls="", ms=7,
+                          color=_model_color(mm, spares), mec="#fcfcfb", mew=1.2,
+                          label=mm) for mm in models]
+    ax.legend(handles=handles, title="model", loc="upper left",
+              framealpha=0.9, fontsize=8)
+    ax.set_xlim(-0.8, ncols - 0.2)
+    ax.set_xticks([])
+    ref = next((r.get("reference") for r in runs if r.get("reference")), "substrate")
+    ax.set_ylabel("formation energy (eV, vs ½H₂/½N₂/½O₂ + slab)"
+                  if ref == "formation" else "energy relative to substrate (eV)")
+    ax.set_title(title)
+    ax.grid(axis="y", color="#e8e8e6", lw=0.8, zorder=0)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor="#fcfcfb")
+    plt.close(fig)

@@ -84,6 +84,104 @@ def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
     return res, geo
 
 
+def relax_states(cfg: Config, seed: int, log=print) -> dict[str, float]:
+    """Relax every network state for one seed (no NEB) -> {state: energy}.
+
+    The cheap building block for a cross-model state-energy comparison: it skips
+    the expensive barrier search and only reports the relaxed adsorption energy
+    of each state.
+    """
+    net = _build_net(cfg, log)
+    slab = net.slab()
+    n_slab = slab.info["n_slab"]
+    all_syms: set[str] = set()
+    for st in net.states().values():
+        all_syms |= symbols_of(st.build(slab))
+    check_supported(all_syms, cfg.mlip)
+    out: dict[str, float] = {}
+    for name, st in net.states().items():
+        res, geo = _relax_state(st, slab, n_slab, cfg, seed)
+        out[name] = res.energy
+        flag = "" if geo.ok else f"  (geometry: {'; '.join(geo.reasons)})"
+        log(f"  [{name}] seed={seed}: E={res.energy:.3f} eV{flag}")
+    return out
+
+
+# element -> gas-phase reference molecule for the chemical potential mu = E/natoms
+_GAS_REF = {"H": "H2", "N": "N2", "O": "O2"}
+
+
+def _reference_energies(cfg: Config, slab, elements: set[str], log=print):
+    """Clean-slab energy + per-element gas-phase chemical potential (this potential).
+
+    ``mu[X] = E(gas X2) / 2`` and the clean-slab energy anchor a *formation*
+    energy that cancels each potential's per-atom reference convention -- the
+    only way a cross-model comparison of composition-changing states is physical.
+    """
+    from ase.build import molecule
+
+    e_slab = relax(slab.copy(), make_calculator(cfg.mlip),
+                   fmax=cfg.search.fmax, max_steps=cfg.search.max_steps).energy
+    log(f"  ref: clean slab E={e_slab:.3f} eV")
+    mu: dict[str, float] = {}
+    for el in sorted(elements):
+        name = _GAS_REF.get(el)
+        if name is None:
+            raise ValueError(f"no gas reference for element {el!r} "
+                             "(formation referencing supports H, N, O)")
+        mol = molecule(name)
+        mol.cell = [12.0, 12.0, 12.0]
+        mol.center()
+        mol.pbc = True
+        e = relax(mol, make_calculator(cfg.mlip), fmax=0.03, max_steps=200).energy
+        mu[el] = e / len(mol)
+        log(f"  ref: mu[{el}]={mu[el]:.3f} eV (1/2 {name})")
+    return e_slab, mu
+
+
+def run_states(cfg: Config, log=print, reference: str = "formation") -> dict:
+    """Relax states for every seed; return per-state energy samples.
+
+    One backend per call (the active env's), so several of these -- run in each
+    backend's venv -- combine into a cross-model comparison via
+    :func:`atosim.viz.compare_boxplot`.
+
+    ``reference="formation"`` (default) reports each state as a formation energy
+    vs gas-phase references + clean slab, computed *in this potential*, so
+    composition-changing states are comparable across potentials. ``"substrate"``
+    just subtracts the root state (only meaningful within one potential).
+    """
+    net = _build_net(cfg, log)
+    root = net.order()[0]
+    resolved = resolve_backend(cfg.mlip.backend)
+    tag = f"{resolved}:{cfg.mlip.model}" if cfg.mlip.model else resolved
+    states = net.states()
+
+    e_slab = mu = None
+    if reference == "formation":
+        elements: set[str] = set()
+        for st in states.values():
+            elements |= set(st.adsorbate_counts())
+        e_slab, mu = _reference_energies(cfg, net.slab(), elements, log)
+
+    per_state: dict[str, list[float]] = {}
+    for seed in cfg.search.seeds:
+        log(f"=== {tag} seed={seed} ===")
+        e = relax_states(cfg, seed, log=log)
+        if reference == "formation":
+            for name, val in e.items():
+                counts = states[name].adsorbate_counts()
+                ref = e_slab + sum(counts[el] * mu[el] for el in counts)
+                per_state.setdefault(name, []).append(val - ref)
+        else:
+            r = e.get(root)
+            for name, val in e.items():
+                per_state.setdefault(name, []).append(val - r if r is not None else val)
+    return {"model": tag, "reference": reference, "network": cfg.network,
+            "substrate": cfg.substrate, "target": cfg.target, "order": net.order(),
+            "seeds": list(cfg.search.seeds), "states": per_state}
+
+
 def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None) -> dict:
     """Run the whole network for a single seed -> a JSON-serialisable partial.
 

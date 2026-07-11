@@ -41,8 +41,24 @@ atosim seed <cfg> --seed 0 --out p0.json # one seed → partial JSON (fan-out un
 atosim aggregate <cfg> --partials p*.json # combine partials → outputs
 atosim sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces → multi-row map
 atosim multi <cfg>                       # several substrates (config `substrates:`) → union map
+atosim states <cfg> --out s_mace.json    # relax states only (no NEB) → per-model JSON
+atosim compare --states s_*.json --out cmp.png   # merge → box plot per state, dots per model
 atosim <cfg>                            # shorthand for `run`
-# overrides: --backend --models --seeds 0,1,2 --reagents H,O --name --outdir
+# overrides: --backend --models --seeds 0,1,2 --reagents H,O --device cuda --name --outdir
+```
+
+### Cross-model comparison (backends that can't share an env)
+
+The ML backends have conflicting deps, so run `states` in each backend's venv,
+then `compare` the JSONs. Each state becomes a box (its pooled distribution)
+with one dot per sample coloured by model; states are packed into the fewest
+non-overlapping columns (distinct energies share a column, clusters shift right):
+
+```bash
+.venv-chgnet/bin/atosim   states cmp.yaml --backend chgnet   --device cuda --out s_chgnet.json
+.venv-fairchem/bin/atosim states cmp.yaml --backend fairchem --device cpu  --out s_fairchem.json
+uv run atosim           states cmp.yaml --backend mace     --device cuda --out s_mace.json
+uv run atosim compare --states s_*.json --out compare.png
 ```
 
 ## Snakemake

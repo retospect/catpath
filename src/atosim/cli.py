@@ -17,16 +17,18 @@ from pathlib import Path
 
 from .config import Config
 from .multi import run_multi, write_multi
-from .pipeline import aggregate_partials, run, run_one_seed, write_outputs
+from .pipeline import aggregate_partials, run, run_one_seed, run_states, write_outputs
 from .sweep import run_sweep, write_sweep
 
-_COMMANDS = {"run", "seed", "aggregate", "sweep", "multi"}
+_COMMANDS = {"run", "seed", "aggregate", "sweep", "multi", "states", "compare"}
 
 
 def _load(args) -> Config:
     cfg = Config.from_yaml(args.config) if args.config else Config()
     if getattr(args, "backend", None):
         cfg.mlip.backend = args.backend
+    if getattr(args, "device", None):
+        cfg.mlip.device = args.device
     if getattr(args, "models", None):
         cfg.mlip.models = [m.strip() for m in args.models.split(",")]
     if getattr(args, "seeds", None):
@@ -54,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     common.add_argument("config", nargs="?", help="run config YAML")
     common.add_argument("--backend",
                         help="override MLIP backend (emt|mace|chgnet|fairchem|grace|auto)")
+    common.add_argument("--device", help="override compute device (cpu|cuda)")
     common.add_argument("--models", help="multi-model: comma-separated, e.g. small,medium "
                                          "or mace:small,mace:medium")
     common.add_argument("--seeds", help="override seeds, comma-separated")
@@ -79,8 +82,35 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("multi", parents=[common],
                    help="run several substrates (config `substrates:`) -> combined energy map")
 
+    pst = sub.add_parser("states", parents=[common],
+                         help="relax states only (no NEB) -> per-model JSON for `compare`")
+    pst.add_argument("--out", required=True, help="states JSON output path")
+    pst.add_argument("--reference", choices=["formation", "substrate"],
+                     default="formation",
+                     help="formation (gas-ref, cross-model comparable) | substrate (root-relative)")
+
+    pc = sub.add_parser("compare", help="combine `states` JSONs -> box plot per state")
+    pc.add_argument("--states", nargs="+", required=True, help="states JSON files")
+    pc.add_argument("--out", required=True, help="box-plot PNG output path")
+    pc.add_argument("--title", default="State energies by model")
+
     args = p.parse_args(argv)
+
+    if args.cmd == "compare":  # no run config; just merge JSONs -> plot
+        from .viz import compare_boxplot
+        runs = [json.loads(Path(f).read_text()) for f in args.states]
+        compare_boxplot(runs, args.out, title=args.title)
+        print(f"wrote box plot ({len(runs)} model(s)) -> {args.out}")
+        return 0
+
     cfg = _load(args)
+
+    if args.cmd == "states":
+        data = run_states(cfg, reference=args.reference)
+        Path(args.out).write_text(json.dumps(data, indent=2))
+        print(f"wrote states for {data['model']} "
+              f"({len(data['states'])} states, seeds={data['seeds']}) -> {args.out}")
+        return 0
 
     if args.cmd == "multi":
         specs = cfg.substrate_runs()
