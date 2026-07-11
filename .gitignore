@@ -11,3 +11,4 @@ runs/
 .uv/
 build/
 dist/
+.venv-*/

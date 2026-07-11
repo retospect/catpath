@@ -20,9 +20,11 @@ dependencies = [
 # Production ML potentials (heavy; GPU). Install on the GB10 box when needed.
 # nvrtc>=12.9 is required for the GB10/Blackwell sm_121 JIT (torch's cu128 wheel
 # ships nvrtc 12.8, which rejects sm_121). See docs/USAGE.md.
+# nvidia-cuda-nvrtc-cu12>=12.9 is the GB10/Blackwell sm_121 fix for the torch
+# backends (the cu128 wheel bundles 12.8, which rejects sm_121 at JIT time).
 mace = ["torch", "mace-torch", "nvidia-cuda-nvrtc-cu12>=12.9"]
-chgnet = ["torch", "chgnet"]
-fairchem = ["torch", "fairchem-core"]          # UMA weights are HF-license-gated
+chgnet = ["torch", "chgnet", "nvidia-cuda-nvrtc-cu12>=12.9"]
+fairchem = ["torch", "fairchem-core", "nvidia-cuda-nvrtc-cu12>=12.9"]  # UMA weights HF-gated
 grace = ["tensorpotential"]                    # TensorFlow-based
 orchestration = ["snakemake>=8"]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
