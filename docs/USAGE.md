@@ -42,7 +42,10 @@ atosim aggregate <cfg> --partials p*.json # combine partials → outputs
 atosim sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces → multi-row map
 atosim multi <cfg>                       # several substrates (config `substrates:`) → union map
 atosim states <cfg> --out s_mace.json    # relax states only (no NEB) → per-model JSON
+atosim barriers <cfg> --out b_mace.json  # NEB for every step → per-model barrier JSON
 atosim compare --states s_*.json --out cmp.png   # merge → box plot per state, dots per model
+atosim compare --states b_*.json --out bars.png  # barrier JSONs → Ea box plot, rate-limiting ringed
+atosim compare --states b_*.json --heights s_*.json --out ts.png  # TS heights, highest point starred
 atosim <cfg>                            # shorthand for `run`
 # overrides: --backend --models --seeds 0,1,2 --reagents H,O --device cuda --name --outdir
 ```

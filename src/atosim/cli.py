@@ -107,12 +107,21 @@ def main(argv: list[str] | None = None) -> int:
                          "root; 'none' = absolute formation energies)")
     pc.add_argument("--layout", choices=["ordered", "packed"], default="ordered",
                     help="ordered = reaction order (substrate left); packed = energy columns")
+    pc.add_argument("--heights", nargs="+", default=None,
+                    help="states JSONs to pair with barrier JSONs -> transition-state "
+                         "height plot (E_form(reactant)+Ea), highest point starred")
 
     args = p.parse_args(argv)
 
     if args.cmd == "compare":  # no run config; just merge JSONs -> plot
         runs = [json.loads(Path(f).read_text()) for f in args.states]
-        if runs and "steps" in runs[0]:            # barriers JSONs -> Ea box plot
+        if runs and "steps" in runs[0]:            # barrier JSONs
+            if args.heights:                       # + states -> TS-height plot
+                from .viz import compare_ts_heights
+                state_runs = [json.loads(Path(f).read_text()) for f in args.heights]
+                compare_ts_heights(runs, state_runs, args.out, title=args.title)
+                print(f"wrote TS-height plot ({len(runs)} model(s)) -> {args.out}")
+                return 0
             from .viz import compare_barriers
             compare_barriers(runs, args.out, title=args.title)
             print(f"wrote barrier box plot ({len(runs)} model(s)) -> {args.out}")
