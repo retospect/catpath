@@ -3,9 +3,11 @@ and the states-only relax path (EMT)."""
 
 import json
 
+from pytest import approx
+
 from atosim import pipeline
 from atosim.config import Config, MLIPConfig, SlabConfig
-from atosim.viz import _assign_columns, compare_boxplot
+from atosim.viz import _anchor_shift, _assign_columns, _ordered_names, compare_boxplot
 
 
 def test_interval_packing_shifts_only_on_overlap():
@@ -24,6 +26,25 @@ def test_pad_forces_a_shift():
     # spans just touch: no overlap at pad 0, but padding pushes them apart
     assert _assign_columns([(0.0, 1.0), (1.0, 2.0)], pad=0.0)[1] == 1
     assert _assign_columns([(0.0, 1.0), (1.0, 2.0)], pad=0.2)[1] == 2
+
+
+def test_anchor_shift_pins_anchor_to_zero_per_model():
+    runs = [
+        {"model": "a", "states": {"NO": [-0.6, -0.6], "NH3": [-2.7]}},
+        {"model": "b", "states": {"NO": [-1.8], "NH3": [-1.9]}},
+    ]
+    out = _anchor_shift(runs, "NO")
+    assert out[0]["states"]["NO"] == [0.0, 0.0]
+    assert out[1]["states"]["NO"] == [0.0]
+    # the shift is a per-model constant -> reaction energy NO->NH3 is preserved
+    assert out[0]["states"]["NH3"][0] == approx(-2.1)  # -2.7 - (-0.6)
+    assert out[1]["states"]["NH3"][0] == approx(-0.1)  # -1.9 - (-1.8)
+
+
+def test_ordered_names_follows_reaction_order():
+    runs = [{"model": "m", "order": ["NO", "N+O", "NH3"],
+             "states": {"NH3": [0], "NO": [0], "N+O": [0]}}]
+    assert _ordered_names(runs) == ["NO", "N+O", "NH3"]  # substrate first
 
 
 def test_compare_boxplot_writes_png(tmp_path):

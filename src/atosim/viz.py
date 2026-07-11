@@ -245,74 +245,124 @@ def _assign_columns(intervals: list[tuple[float, float]], pad: float):
     return col_of, ncols
 
 
-def compare_boxplot(runs: list[dict], path: str | Path,
-                    title: str = "State energies by model") -> None:
-    """Per-state box + per-model dots, laid out by an energy-interval packing.
+def _anchor_shift(runs: list[dict], anchor: str | None) -> list[dict]:
+    """Subtract each model's own ``anchor`` value from all its states (a fixed
+    per-model offset), pinning ``anchor`` to 0 for every model so the landscape
+    *shape* is compared, not each potential's absolute reference level."""
+    if not anchor:
+        return runs
+    out = []
+    for r in runs:
+        st = r["states"]
+        a = st.get(anchor)
+        if a:
+            s = sum(a) / len(a)
+            st = {k: [v - s for v in vs] for k, vs in st.items()}
+        out.append({**r, "states": st})
+    return out
 
-    ``runs`` is a list of ``{"model": tag, "states": {name: [values]}}`` (one per
-    model). Each state becomes a box (its pooled distribution) plus one dot per
-    sample coloured by model; y is energy relative to the substrate, and states
-    are packed into the fewest non-overlapping columns (see ``_assign_columns``).
-    """
-    # gather per-state (model, value) samples in a stable state order
-    names: list[str] = []
+
+def _ordered_names(runs: list[dict]) -> list[str]:
+    """States in reaction order (the network's topological ``order``), so the
+    substrate is leftmost; any state missing from ``order`` is appended."""
+    order: list[str] = next((r["order"] for r in runs if r.get("order")), [])
+    present = {n for r in runs for n in r["states"]}
+    names = [n for n in order if n in present]
     for r in runs:
         for n in r["states"]:
             if n not in names:
                 names.append(n)
+    return names
+
+
+def compare_boxplot(runs: list[dict], path: str | Path,
+                    title: str = "State energies by model",
+                    anchor: str | None = None, layout: str = "ordered") -> None:
+    """Per-state box + per-model dots for comparing potentials on one network.
+
+    ``runs`` is a list of ``{"model": tag, "states": {name: [values]}, "order":
+    [...]}`` (one per model). Each state becomes a box (its pooled distribution)
+    plus one dot per sample coloured by model.
+
+    ``anchor`` pins that state to 0 for every model (a per-model constant shift),
+    so you compare landscape shape rather than absolute reference levels.
+    ``layout="ordered"`` places states left-to-right in reaction order (substrate
+    first); ``"packed"`` packs them into the fewest non-overlapping energy columns.
+    """
+    runs = _anchor_shift(runs, anchor)
+    if layout == "ordered":
+        names = _ordered_names(runs)
+    else:
+        names = []
+        for r in runs:
+            for n in r["states"]:
+                if n not in names:
+                    names.append(n)
+
     samples = {n: [(r["model"], v) for r in runs for v in r["states"].get(n, [])]
                for n in names}
     names = [n for n in names if samples[n]]
     if not names:
         raise ValueError("no state samples to plot")
-
     vals = {n: np.array([v for _, v in samples[n]], float) for n in names}
-    allv = np.concatenate(list(vals.values()))
-    span = float(allv.max() - allv.min()) or 1.0
-    pad = 0.045 * span                         # breathing room between stacked boxes
-    intervals = [(float(vals[n].min()), float(vals[n].max())) for n in names]
-    col_of, ncols = _assign_columns(intervals, pad)
+
+    if layout == "ordered":
+        pos = list(range(len(names)))
+        ncols = len(names)
+    else:
+        allv = np.concatenate(list(vals.values()))
+        pad = 0.045 * (float(allv.max() - allv.min()) or 1.0)
+        intervals = [(float(vals[n].min()), float(vals[n].max())) for n in names]
+        pos, ncols = _assign_columns(intervals, pad)
+    top = float(np.concatenate(list(vals.values())).max())
+    bot = float(np.concatenate(list(vals.values())).min())
+    labpad = 0.02 * (top - bot or 1.0)
 
     spares: dict = {}
-    models = []
-    for r in runs:                             # legend order = run order
+    models: list[str] = []
+    for r in runs:
         if r["model"] not in models:
             models.append(r["model"])
 
-    fig, ax = plt.subplots(figsize=(max(4, 1.7 * ncols + 2.2),
-                                    max(4, 0.34 * len(names) + 2)))
-    half = 0.30                                # box half-width in column units
+    fig, ax = plt.subplots(figsize=(max(5, 0.62 * ncols + 2.2),
+                                    max(4, 0.28 * len(names) + 3)))
+    half = 0.32
     for i, n in enumerate(names):
-        x = col_of[i]
+        x = pos[i]
         v = vals[n]
         q1, med, q3 = np.percentile(v, [25, 50, 75])
         lo, hi = v.min(), v.max()
-        # recessive box (q1-q3) + whiskers + median
         ax.add_patch(plt.Rectangle((x - half, q1), 2 * half, max(q3 - q1, 1e-9),
                                    facecolor="#f0f0ee", edgecolor="#b8b7b2",
                                    linewidth=1.0, zorder=1))
         ax.plot([x - half, x + half], [med, med], color="#6b6a66", lw=1.6, zorder=2)
         ax.plot([x, x], [lo, q1], color="#b8b7b2", lw=1.0, zorder=1)
         ax.plot([x, x], [q3, hi], color="#b8b7b2", lw=1.0, zorder=1)
-        # per-sample dots, jittered in x, coloured by model, 2px surface ring
         m = len(samples[n])
         for k, (model, val) in enumerate(samples[n]):
             jx = x + (((k + 0.5) / m) - 0.5) * (1.5 * half)
             ax.plot(jx, val, "o", ms=6, color=_model_color(model, spares),
                     mec="#fcfcfb", mew=1.2, zorder=4)
-        ax.text(x, hi + pad * 0.5, n, ha="center", va="bottom",
-                fontsize=7, color="#0b0b0b", zorder=5)
+        if layout == "packed":                 # name floats above each box
+            ax.text(x, hi + labpad, n, ha="center", va="bottom",
+                    fontsize=7, color="#0b0b0b", zorder=5)
 
     handles = [plt.Line2D([0], [0], marker="o", ls="", ms=7,
                           color=_model_color(mm, spares), mec="#fcfcfb", mew=1.2,
                           label=mm) for mm in models]
-    ax.legend(handles=handles, title="model", loc="upper left",
-              framealpha=0.9, fontsize=8)
-    ax.set_xlim(-0.8, ncols - 0.2)
-    ax.set_xticks([])
-    ref = next((r.get("reference") for r in runs if r.get("reference")), "substrate")
-    ax.set_ylabel("formation energy (eV, vs ½H₂/½N₂/½O₂ + slab)"
-                  if ref == "formation" else "energy relative to substrate (eV)")
+    ax.legend(handles=handles, title="model", loc="best", framealpha=0.9, fontsize=8)
+    if layout == "ordered":
+        ax.set_xticks(range(len(names)))
+        ax.set_xticklabels(names, rotation=45, ha="right", fontsize=7)
+        ax.set_xlim(-0.8, len(names) - 0.2)
+        ax.set_xlabel("reaction coordinate (topological order)")
+        if anchor and anchor in names:         # mark the common zero
+            ax.axhline(0.0, color="#b8b7b2", lw=1.0, ls="--", zorder=0)
+    else:
+        ax.set_xticks([])
+        ax.set_xlim(-0.8, ncols - 0.2)
+    ax.set_ylabel(f"energy relative to {anchor} (eV)" if anchor
+                  else "formation energy (eV, vs gas refs + slab)")
     ax.set_title(title)
     ax.grid(axis="y", color="#e8e8e6", lw=0.8, zorder=0)
     ax.set_axisbelow(True)

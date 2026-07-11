@@ -107,35 +107,44 @@ def relax_states(cfg: Config, seed: int, log=print) -> dict[str, float]:
     return out
 
 
-# element -> gas-phase reference molecule for the chemical potential mu = E/natoms
-_GAS_REF = {"H": "H2", "N": "N2", "O": "O2"}
+def _gas_energy(cfg: Config, name: str) -> float:
+    """Relaxed total energy of a gas-phase molecule in a large box (this potential)."""
+    from ase.build import molecule
+
+    mol = molecule(name)
+    mol.cell = [12.0, 12.0, 12.0]
+    mol.center()
+    mol.pbc = True
+    return relax(mol, make_calculator(cfg.mlip), fmax=0.03, max_steps=200).energy
 
 
 def _reference_energies(cfg: Config, slab, elements: set[str], log=print):
     """Clean-slab energy + per-element gas-phase chemical potential (this potential).
 
-    ``mu[X] = E(gas X2) / 2`` and the clean-slab energy anchor a *formation*
-    energy that cancels each potential's per-atom reference convention -- the
-    only way a cross-model comparison of composition-changing states is physical.
+    Anchors a *formation* energy that cancels each potential's per-atom reference
+    convention -- the only way a cross-model comparison of composition-changing
+    states is physical.  References: ``mu_H = 1/2 E(H2)``, ``mu_N = 1/2 E(N2)``,
+    and ``mu_O = E(H2O) - 2 mu_H`` (water, NOT 1/2 O2 -- O2 is a notoriously bad
+    reference under PBE-trained potentials, and water keeps O comparable).
     """
-    from ase.build import molecule
-
     e_slab = relax(slab.copy(), make_calculator(cfg.mlip),
                    fmax=cfg.search.fmax, max_steps=cfg.search.max_steps).energy
     log(f"  ref: clean slab E={e_slab:.3f} eV")
     mu: dict[str, float] = {}
-    for el in sorted(elements):
-        name = _GAS_REF.get(el)
-        if name is None:
-            raise ValueError(f"no gas reference for element {el!r} "
-                             "(formation referencing supports H, N, O)")
-        mol = molecule(name)
-        mol.cell = [12.0, 12.0, 12.0]
-        mol.center()
-        mol.pbc = True
-        e = relax(mol, make_calculator(cfg.mlip), fmax=0.03, max_steps=200).energy
-        mu[el] = e / len(mol)
-        log(f"  ref: mu[{el}]={mu[el]:.3f} eV (1/2 {name})")
+    # O is referenced through water, which needs mu_H, so compute H whenever O is asked.
+    if "H" in elements or "O" in elements:
+        mu["H"] = _gas_energy(cfg, "H2") / 2
+        log(f"  ref: mu[H]={mu['H']:.3f} eV (1/2 H2)")
+    if "N" in elements:
+        mu["N"] = _gas_energy(cfg, "N2") / 2
+        log(f"  ref: mu[N]={mu['N']:.3f} eV (1/2 N2)")
+    if "O" in elements:
+        mu["O"] = _gas_energy(cfg, "H2O") - 2 * mu["H"]
+        log(f"  ref: mu[O]={mu['O']:.3f} eV (H2O - 2 mu_H)")
+    missing = elements - set(mu)
+    if missing:
+        raise ValueError(f"no gas reference for element(s) {sorted(missing)} "
+                         "(formation referencing supports H, N, O)")
     return e_slab, mu
 
 

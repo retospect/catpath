@@ -93,14 +93,28 @@ def main(argv: list[str] | None = None) -> int:
     pc.add_argument("--states", nargs="+", required=True, help="states JSON files")
     pc.add_argument("--out", required=True, help="box-plot PNG output path")
     pc.add_argument("--title", default="State energies by model")
+    pc.add_argument("--anchor", default="",
+                    help="pin this state to 0 for every model (default: the substrate "
+                         "root; 'none' = absolute formation energies)")
+    pc.add_argument("--layout", choices=["ordered", "packed"], default="ordered",
+                    help="ordered = reaction order (substrate left); packed = energy columns")
 
     args = p.parse_args(argv)
 
     if args.cmd == "compare":  # no run config; just merge JSONs -> plot
         from .viz import compare_boxplot
         runs = [json.loads(Path(f).read_text()) for f in args.states]
-        compare_boxplot(runs, args.out, title=args.title)
-        print(f"wrote box plot ({len(runs)} model(s)) -> {args.out}")
+        if args.anchor.lower() == "none":
+            anchor = None
+        elif args.anchor:
+            anchor = args.anchor
+        else:  # default: pin the substrate root (first state in reaction order)
+            order = next((r["order"] for r in runs if r.get("order")), [])
+            anchor = order[0] if order else None
+        compare_boxplot(runs, args.out, title=args.title, anchor=anchor,
+                        layout=args.layout)
+        print(f"wrote box plot ({len(runs)} model(s), anchor={anchor}, "
+              f"{args.layout}) -> {args.out}")
         return 0
 
     cfg = _load(args)
