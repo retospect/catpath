@@ -49,10 +49,11 @@ class SlabConfig:
 
 @dataclass
 class MLIPConfig:
-    backend: str = "emt"  # emt | mace | fairchem
-    model: str | None = None  # checkpoint name/path for mace/fairchem
+    backend: str = "emt"  # emt | mace | chgnet | fairchem | grace | auto
+    model: str | None = None  # checkpoint / model name (backend-specific)
     models: list[str] = field(default_factory=list)  # multi-model: each "model" or "backend:model"
     device: str = "cpu"
+    task: str | None = None  # FAIRChem/UMA task head (defaults to "oc20": adsorbates on metals)
 
     def specs(self) -> list[tuple[str, str | None]]:
         """(backend, model) pairs to run. Multi-model when ``models`` is set."""

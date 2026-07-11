@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .calculators import check_supported, make_calculator
+from .calculators import check_supported, make_calculator, resolve_backend
 from .config import Config
 from .graph import build_graph, to_csv, to_json
 from .network import Network, StateSpec, build_network
@@ -197,6 +197,10 @@ def run(cfg: Config, log=print) -> Results:
     lattice: dict[str, float] = {}
     specs = cfg.mlip.specs()
     for si, (backend, model) in enumerate(specs):
+        resolved = resolve_backend(backend)  # `auto` -> best installed ML backend
+        if resolved != backend:
+            log(f"backend: auto -> {resolved} (best installed ML potential)")
+        backend = resolved
         tag = f"{backend}:{model}" if model else backend
         c = copy.deepcopy(cfg)
         c.mlip.backend, c.mlip.model, c.mlip.models = backend, model, []
@@ -281,7 +285,7 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
     summary = {
         "name": cfg.name,
         "substrate": cfg.substrate, "target": cfg.target,
-        "backend": cfg.mlip.backend, "models": results.models,
+        "backend": resolve_backend(cfg.mlip.backend), "models": results.models,
         "seeds": cfg.search.seeds,
         "n_samples": max(1, len(results.models)) * len(cfg.search.seeds),
         "relaxed_lattice_A": results.lattice,

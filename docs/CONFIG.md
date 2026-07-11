@@ -19,11 +19,12 @@ slab:                        # the ENVIRONMENT (catalyst surface)
   relax_lattice: true        # fit the lattice constant to the potential (removes strain)
   a: null                    # or pin the lattice constant (Å) explicitly
 
-mlip:                        # the POTENTIAL(s)
-  backend: mace              # emt | mace | fairchem
+mlip:                        # the POTENTIAL(s)   -> see §Potentials
+  backend: auto              # emt | mace | chgnet | fairchem | grace | auto
   models: ["small","medium"] # HOW MANY / WHICH models  -> see §Models
   model: null                # single-model shorthand (used if `models` empty)
   device: cuda               # cpu | cuda
+  task: null                 # FAIRChem/UMA task head (default "oc20": adsorbates on metals)
 
 search:
   seeds: [0, 1, 2]           # HOW MANY / WHICH seeds   -> see §Seeds
@@ -52,6 +53,34 @@ render:                      # how active-site thumbnails/gallery are drawn
 
 outdir: runs
 ```
+
+## §Potentials — pluggable ML backends ✅
+`mlip.backend` picks who computes energies/forces. Every backend is an ASE
+calculator behind a **lazy import**, so an uninstalled one costs nothing until
+selected.
+
+| backend | what | install | notes |
+|---|---|---|---|
+| `emt` | ASE Effective Medium Theory | *(none)* | **Not ML, not accurate** — dev/CI only. Pd Pt Cu Ni Ag Au Al C N O H. |
+| `mace` | MACE-MP-0 universal | `pip install atosim[mace]` | GPU; solid general default. |
+| `chgnet` | CHGNet universal | `pip install atosim[chgnet]` | CPU-friendly. |
+| `fairchem` | Meta FAIRChem / UMA | `pip install atosim[fairchem]` | Purpose-built for adsorbates-on-metals (OC20 task); UMA weights **license-gated** (HF login). |
+| `grace` | GRACE foundation models | `pip install atosim[grace]` | TensorFlow-based. |
+| `auto` | best **installed** ML backend | — | resolves in order mace → fairchem → grace → chgnet. |
+
+The ML backends are *universal* (whole periodic table), so only EMT restricts
+elements. **`backend: auto` raises if no ML potential is installed** — it never
+silently drops to EMT, so a run that asked for a real potential either uses one
+or tells you to install one. The resolved backend is logged and recorded in
+`results.json` / `methods.md`.
+
+⚠️ **You cannot install all backends in one environment** — their transitive
+pins conflict (e.g. `mace-torch` needs `e3nn==0.4.4`, `fairchem-core` needs
+`e3nn>=0.5`). uv treats the extras as mutually exclusive; install **one per env**
+(or use `auto` with whatever is present). `fairchem`/`chgnet`/`grace` are wired to
+each library's current ASE-calculator API but were authored without the package
+installed here — expect a possible version tweak on first real use; `mace` and
+`emt` are exercised in CI.
 
 ## §Seeds — fully controllable ✅
 `search.seeds: [0, 1, 2]` — an explicit list. **How many** = length; **which** =
@@ -172,6 +201,7 @@ to matplotlib** — the run never fails. Override at the CLI is via the config
 ### Summary
 | Axis | How you set it | Status |
 |---|---|---|
+| Potential (which backend) | `mlip.backend: emt\|mace\|chgnet\|fairchem\|grace\|auto` | ✅ pluggable (+ safe `auto`) |
 | Seeds (how many / which) | `search.seeds: [...]` | ✅ first-class |
 | Models (how many / which) | `mlip.models: [...]` | ✅ first-class |
 | Reagents (which) | `reagents: [...]` (filters branches) | ✅ first-class |

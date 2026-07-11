@@ -48,7 +48,7 @@ layers fixed, {cfg.slab.vacuum} A vacuum) were explored with the *atosim* pipeli
 (v{__version__}). The `{cfg.network}` reaction network comprised {n_states} adsorbate
 states and {n_rxn} elementary steps.
 
-Energies and forces were evaluated with the machine-learned interatomic
+Energies and forces were evaluated with the interatomic
 potential(s): **{', '.join(models)}** (device: {cfg.mlip.device}). For each of
 {len(cfg.search.seeds)} random seed(s) {list(cfg.search.seeds)} and each model,
 adsorbate poses were perturbed, pre-relaxed, then relaxed with BFGS to a maximum

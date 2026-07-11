@@ -15,8 +15,8 @@ slab:
   vacuum: 10.0
   fix_layers: 2      # freeze bottom N layers
 mlip:
-  backend: emt       # emt | mace | fairchem
-  model: null        # checkpoint for mace/fairchem
+  backend: auto      # emt | mace | chgnet | fairchem | grace | auto (best installed ML)
+  model: null        # model/checkpoint name (backend-specific)
   device: cpu        # cpu | cuda
 search:
   neb_images: 5
@@ -63,7 +63,7 @@ seed re-runs on its own; unchanged seeds are cached.
 
 | Want to… | Edit |
 |---|---|
-| Add an MLIP backend | `calculators.make_calculator` (add an `elif`) |
+| Add an MLIP backend | `calculators._load` (+ `_MODULE`/`_EXTRA`/`AUTO_ORDER`) |
 | Add a reaction / intermediate | `network.build_network` (add a `StepSpec`), or `network: auto` to autodetect them (`explore.py`) |
 | Change adsorption sites / poses | `structures.SITE_NAMES`, `poses`, `place_fragments` |
 | Tune convergence criteria | `relax.relax`, `config.SearchConfig` |
@@ -72,15 +72,21 @@ seed re-runs on its own; unchanged seeds are cached.
 
 ### Production accuracy
 
-The `emt` backend is a placeholder. On the GB10 GPU box:
+The `emt` backend is **not ML** — a placeholder to exercise the pipeline. Real
+runs use a machine-learned potential; install exactly **one** ML backend per env
+(their torch/e3nn pins conflict — uv treats the extras as mutually exclusive):
 
 ```bash
-uv sync --extra mace
-# set mlip.backend: mace, mlip.device: cuda in the config
+uv sync --extra mace        # or: --extra chgnet | --extra fairchem | --extra grace
+# then set mlip.backend: mace (or auto), mlip.device: cuda in the config
 ```
 
-`fairchem` (Open Catalyst) models are purpose-built for adsorbates on metal
-surfaces and are the recommended production choice for the NO/Pd chemistry.
+`backend: auto` picks the best **installed** ML backend (mace → fairchem → grace
+→ chgnet) and **errors if none is installed** rather than silently using EMT — so
+you never mistake a semi-empirical smoke for a real result. `fairchem` (Meta
+FAIRChem / UMA, OC20 task) is purpose-built for adsorbates on metal surfaces and
+is the recommended production choice for the NO/Pd chemistry; its weights are
+Hugging-Face-license-gated (needs a login).
 
 ### GPU on the DGX Spark / GB10 (Blackwell, sm_121)
 

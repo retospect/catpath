@@ -77,7 +77,17 @@ priority-ordered within sections.
   non-convergence from 14/23 → 4/23. See `neb.neb_barrier`, `tests/test_neb.py`.
 - [ ] **Strain sensitivity study** — option to vary lattice constant and measure
   how much adsorption energies shift (complements lattice relaxation).
-- [ ] **fairchem backend** — wire Open Catalyst models; compare vs MACE.
+- [x] **ML potential registry + `auto`** — `make_calculator` now dispatches
+  emt | mace | chgnet | fairchem | grace via lazy imports (optional pip extras;
+  uv `conflicts` keeps their incompatible torch pins in separate envs).
+  `backend: auto` resolves to the best *installed* ML backend and **errors
+  rather than silently using EMT**. Verified: `auto` -> MACE computes a real
+  single-point (NO/Pd -70.4 eV). See `calculators.py`, `tests/test_calculators.py`.
+- [ ] **fairchem / chgnet / grace first real run** — the three new backends are
+  wired to each library's current ASE-calculator API but were authored without
+  the package installed (only mace+emt are here). Install one and do a real
+  single-point/relax to confirm the API call + `task`/model defaults; adjust if
+  the upstream signature drifted. Then compare adsorption energies vs MACE.
 - [ ] **Ensemble / committee uncertainty** — beyond seeds×models; per-model
   breakdown in `results.json`.
 - [ ] **GPU**: drop the nvrtc pin once an aarch64 `cu130` torch wheel exists.

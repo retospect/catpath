@@ -52,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("config", nargs="?", help="run config YAML")
-    common.add_argument("--backend", help="override MLIP backend (emt|mace|fairchem)")
+    common.add_argument("--backend",
+                        help="override MLIP backend (emt|mace|chgnet|fairchem|grace|auto)")
     common.add_argument("--models", help="multi-model: comma-separated, e.g. small,medium "
                                          "or mace:small,mace:medium")
     common.add_argument("--seeds", help="override seeds, comma-separated")

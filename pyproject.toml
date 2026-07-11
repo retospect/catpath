@@ -21,8 +21,19 @@ dependencies = [
 # nvrtc>=12.9 is required for the GB10/Blackwell sm_121 JIT (torch's cu128 wheel
 # ships nvrtc 12.8, which rejects sm_121). See docs/USAGE.md.
 mace = ["torch", "mace-torch", "nvidia-cuda-nvrtc-cu12>=12.9"]
+chgnet = ["torch", "chgnet"]
+fairchem = ["torch", "fairchem-core"]          # UMA weights are HF-license-gated
+grace = ["tensorpotential"]                    # TensorFlow-based
 orchestration = ["snakemake>=8"]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
+
+# These ML backends have incompatible transitive pins (e.g. mace-torch needs
+# e3nn==0.4.4 while fairchem-core needs e3nn>=0.5), so they cannot share one
+# environment.  Declaring them as conflicting lets uv resolve each in its own
+# fork; install exactly ONE per env (or use `backend: auto` with whatever's there).
+[tool.uv]
+conflicts = [[{ extra = "mace" }, { extra = "chgnet" },
+              { extra = "fairchem" }, { extra = "grace" }]]
 
 [project.scripts]
 atosim = "atosim.cli:main"
