@@ -29,10 +29,10 @@ jobs:
       # heavy, GPU-oriented, and mutually conflicting, so CI runs on the EMT
       # backend, which exercises the whole pipeline with no torch.
       - name: Install (base + dev)
-        run: uv pip install --system -e ".[dev]"
+        run: uv sync --extra dev
 
       - name: Lint
-        run: ruff check src tests
+        run: uv run ruff check src tests
 
       - name: Test
-        run: pytest -q
+        run: uv run pytest
