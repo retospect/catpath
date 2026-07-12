@@ -108,6 +108,16 @@ uv run ruff check src tests
 uv run pytest
 ```
 
+## Contributing
+
+Issues and PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Maintained by
+Reto Stamm.
+
+## Acknowledgements
+
+catpath was requested by **Muhammad Umer**, whose help shaping what it should do
+got the project off the ground.
+
 ## License
 
 GPL-3.0-or-later. Built on [ASE](https://wiki.fysik.dtu.dk/ase/) (LGPL) and
