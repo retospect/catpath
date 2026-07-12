@@ -118,6 +118,9 @@ Reto Stamm.
 catpath was requested by **Muhammad Umer**, whose help shaping what it should do
 got the project off the ground.
 
+Built with **Claude** (Anthropic) via Claude Code, with research assistance from
+**Perplexity**.
+
 ## License
 
 GPL-3.0-or-later. Built on [ASE](https://wiki.fysik.dtu.dk/ase/) (LGPL) and

@@ -54,3 +54,6 @@ By contributing you agree that your contributions are licensed under
 
 catpath was requested by **Muhammad Umer**, whose help shaping what it should do
 got it off the ground — thank you.
+
+Built with **Claude Code** (Anthropic), with research assistance from
+**Perplexity**.
