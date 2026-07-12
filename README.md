@@ -1,90 +1,114 @@
-# atosim
+# catpath
 
-Reproducible, ML-potential reaction-pathway explorer. Given an **environment**
-(a metal surface), a **substrate**, and a **target**, it explores candidate
-reaction pathways, estimates energies and barriers (NEB), and emits a **reaction
-graph** plus a **substrate × intermediate energy map** — with honest uncertainty
-from **multi-seed** runs.
+[![CI](https://github.com/retospect/catpath/actions/workflows/ci.yml/badge.svg)](https://github.com/retospect/catpath/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/catpath.svg)](https://pypi.org/project/catpath/)
+[![Python](https://img.shields.io/pypi/pyversions/catpath.svg)](https://pypi.org/project/catpath/)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
-**First target:** `NO → NO₃` oxidation on **Pd(111)**.
+**Reaction-pathway explorer for catalyst surfaces, driven by ML interatomic
+potentials.** Give it an environment (a metal surface), a substrate, and a
+target; it builds the reaction network, relaxes every intermediate, finds the
+barriers with climbing-image NEB, and reports energies with **honest
+uncertainty** — pooled across random seeds *and* across ML potentials.
 
-> **Design principle:** stability is an acceptance criterion. If a result depends
-> on the random seed, it's flagged low-confidence rather than reported as a
-> precise number. See [`PLAN.md`](PLAN.md) for the full spec.
+- **Reaction networks** — curated templates *or* rule-based **autodetection** of
+  intermediates (`network: auto`).
+- **Pluggable ML potentials** — `mace`, `chgnet`, `fairchem` (UMA), `grace`, or
+  `auto` (best installed). `emt` is a dependency-free dev backend.
+- **Barriers** — climbing-image NEB with automatic retry on non-convergence.
+- **Cross-model comparison** — run the same network under several potentials and
+  box-plot where they agree and disagree (intermediates, barriers, and which
+  transition state is the true rate-limiting "highest point").
+- **Reproducible** — every run writes a provenance snapshot; unstable results are
+  flagged low-confidence rather than reported as precise numbers.
+
+![Cross-model comparison of intermediate formation energies](https://raw.githubusercontent.com/retospect/catpath/main/docs/img/models_intermediates.png)
+
+*NO→NH₃ on Pd: formation energies of every intermediate under MACE, CHGNet, and
+UMA — the models agree on NO activation but diverge on deep hydrogenation.*
 
 ## Install
 
-Uses [`uv`](https://docs.astral.sh/uv/). The default **EMT** backend is pure
-numpy/ASE (supports Pd, N, O) — no GPU or torch needed, so it runs anywhere.
-
 ```bash
-uv sync --extra dev --extra orchestration
-uv pip install -e .
+pip install catpath
 ```
 
-Production ML potentials are optional and pluggable (installed on the GPU box):
+The default **`emt`** backend is pure numpy/ASE (no torch, no GPU) and runs the
+whole pipeline anywhere — great for trying it out and for CI. For real numbers,
+add exactly one ML backend (their dependencies conflict, so **one per
+environment**):
 
 ```bash
-uv sync --extra mace   # MACE-MP-0 universal potential (GPU)
+pip install "catpath[mace]"      # MACE-MP-0 universal potential (GPU)
+pip install "catpath[chgnet]"    # CHGNet (CPU-friendly)
+pip install "catpath[fairchem]"  # Meta FAIRChem / UMA (adsorbates on metals)
+pip install "catpath[grace]"     # GRACE foundation models
 ```
 
-## Run
+## Quickstart
 
 ```bash
-# whole pipeline (all seeds), in-process:
-uv run atosim examples/no_to_no3_pd.yaml
+# whole pipeline (all seeds) on the dependency-free EMT backend:
+catpath run examples/no_to_no3_pd.yaml
 
-# or orchestrated by Snakemake (fans seeds out across jobs, restartable):
-uv run snakemake -s workflow/Snakefile -c4
+# let the intermediates be discovered automatically, on a real ML potential:
+catpath run examples/auto_ammonia.yaml --backend auto
 ```
 
 Outputs land in `runs/<name>/`:
 
 | File | Contents |
 |---|---|
-| `graph.png` | **reaction energy-profile diagram** — each species a labelled level line, transition states as barrier bumps, competing pathways overlaid |
-| `graph_network.png` | node/DAG view; red = low-confidence node |
+| `graph_thumbs.png` | reaction energy-profile with active-site structure thumbnails |
+| `graph_network.png` | node/DAG view of the network (red = low-confidence) |
 | `energy_map.png` | substrate × intermediate heatmap; ★ = rate-limiting state |
 | `results.json` | nodes, edges, barriers, mean ± spread, warnings |
-| `nodes.csv` / `edges.csv` | machine-readable graph |
-| `energy_map.csv` | the energy matrix |
+| `methods.md` | a deterministic methods paragraph for your write-up |
 | `config.snapshot.yaml` | provenance snapshot for exact reproduction |
 
-## How it works
+## Compare several ML potentials
 
-```
-inputs → build branching network (dissociation | oxidation | reduction fork)
-       → per seed: rattle poses → cheap pre-relax → MLIP relax → CI-NEB barrier
-       → aggregate across seeds (mean ± spread; flag unstable states)
-       → energy profile + node graph + energy map → validate → outputs
-```
+Because the backends can't share an environment, run `states` / `barriers` in
+each one's env, then `compare` the JSONs:
 
-The default `branching` network is a DAG rooted at adsorbed NO with three
-competing routes (set `network: oxidation` for the minimal linear chain):
+```bash
+catpath states   my.yaml --backend chgnet   --out s_chgnet.json
+catpath states   my.yaml --backend fairchem --out s_uma.json
+catpath compare  --states s_*.json --out intermediates.png     # box plot per state
 
-```
-dissociation:  NO → N + O
-oxidation:     NO ─(+O*)→ NO+O → NO2 ─(+O*)→ NO2+O → NO3
-reduction:     NO ─(+H*)→ NO+H → HNO   (H binds N)
-                            NO+H → NOH   (H binds O)   ← fork
+catpath barriers my.yaml --backend chgnet   --out b_chgnet.json
+catpath compare  --states b_*.json --out barriers.png          # Ea, rate-limiting ringed
+catpath compare  --states b_*.json --heights s_*.json --out ts_heights.png
 ```
 
-- **Pluggable MLIP** (`calculators.py`): `emt` (dev) · `mace` · `fairchem`.
-- **Validation layers** (`validate.py`): RDKit sanitization (molecules only),
-  geometry sanity (clashes / detachment), convergence, cross-seed stability.
-- **Uncertainty** (`uncertainty.py`): mean ± std over seeds; `low_confidence`
-  when the spread exceeds tolerance.
+State energies are referenced to per-element gas-phase chemical potentials
+computed *in each potential*, so composition-changing states are comparable
+across models. See [`examples/README.md`](examples/README.md) for the full set of
+commands.
 
-> ⚠️ The bundled **EMT** backend is qualitative only — it exercises the full
-> pipeline without heavy dependencies. Switch `mlip.backend` to `mace` or
-> `fairchem` for quantitative barriers.
+## CLI
+
+```
+catpath run <cfg>            # all seeds in-process + outputs
+catpath states <cfg>         # relax states only (no NEB) -> per-model JSON
+catpath barriers <cfg>       # NEB for every step -> per-model JSON
+catpath compare --states ... # box plots (states or barriers, auto-detected)
+catpath multi <cfg>          # several substrates -> union energy map
+catpath sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces
+```
+
+Everything is one YAML file — see [`docs/CONFIG.md`](docs/CONFIG.md) for every
+field, and [`docs/USAGE.md`](docs/USAGE.md) for extension points.
 
 ## Development
 
 ```bash
-uv run pytest            # 27 tests, ~1.3s (EMT, tiny slabs)
+uv sync --extra dev
+uv run ruff check src tests
+uv run pytest
 ```
 
-Module map: `config` · `calculators` · `structures` · `relax` · `neb` ·
-`network` · `validate` · `uncertainty` · `graph` · `viz` · `pipeline` · `cli`.
-See [`docs/USAGE.md`](docs/USAGE.md) for configuration and extension points.
+## License
+
+GPL-3.0-or-later. Built on [ASE](https://wiki.fysik.dtu.dk/ase/) (LGPL) and
+RDKit (BSD).

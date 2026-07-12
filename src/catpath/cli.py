@@ -1,11 +1,11 @@
 """Command-line entry point.
 
 Subcommands (mirrored by the Snakemake rules):
-  atosim run <cfg>                     run all seeds in-process + write outputs
-  atosim seed <cfg> --seed N --out F   run ONE seed -> partial JSON (fan-out unit)
-  atosim aggregate <cfg> --partials .. combine partials -> outputs
+  catpath run <cfg>                     run all seeds in-process + write outputs
+  catpath seed <cfg> --seed N --out F   run ONE seed -> partial JSON (fan-out unit)
+  catpath aggregate <cfg> --partials .. combine partials -> outputs
 
-The bare form ``atosim <cfg>`` is shorthand for ``atosim run <cfg>``.
+The bare form ``catpath <cfg>`` is shorthand for ``catpath run <cfg>``.
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ def _load(args) -> Config:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    # bare `atosim <cfg>` -> `atosim run <cfg>`
+    # bare `catpath <cfg>` -> `catpath run <cfg>`
     if argv and argv[0] not in _COMMANDS and not argv[0].startswith("-"):
         argv = ["run", *argv]
 
-    p = argparse.ArgumentParser(prog="atosim", description=__doc__)
+    p = argparse.ArgumentParser(prog="catpath", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "multi":
         specs = cfg.substrate_runs()
-        print(f"atosim multi: {len(specs)} substrate(s) on {cfg.slab.element}")
+        print(f"catpath multi: {len(specs)} substrate(s) on {cfg.slab.element}")
         multi = run_multi(cfg)
         outdir = write_multi(cfg, multi)
         print(f"\nDone -> {outdir}")
@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "sweep":
         elements = [e.strip() for e in args.elements.split(",")]
-        print(f"atosim sweep: {cfg.substrate} -> {cfg.target} on {elements}")
+        print(f"catpath sweep: {cfg.substrate} -> {cfg.target} on {elements}")
         sweep = run_sweep(cfg, elements)
         outdir = write_sweep(cfg, sweep)
         print(f"\nDone -> {outdir}")
@@ -186,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # run
-    print(f"atosim: {cfg.substrate} -> {cfg.target} on {cfg.slab.element} "
+    print(f"catpath: {cfg.substrate} -> {cfg.target} on {cfg.slab.element} "
           f"[{cfg.mlip.backend}] seeds={cfg.search.seeds}")
     results = run(cfg)
     outdir = write_outputs(cfg, results)

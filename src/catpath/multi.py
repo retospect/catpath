@@ -1,6 +1,6 @@
 """Run several substrates (each its own network) in one job.
 
-Where :mod:`atosim.sweep` varies the *surface* (same network across metals),
+Where :mod:`catpath.sweep` varies the *surface* (same network across metals),
 this varies the *molecule*: each entry is a distinct ``(substrate, target,
 network, reagents)`` and gets its own full run and per-run artifacts.  The rows
 are then stacked into one **substrate x intermediate energy map** whose columns

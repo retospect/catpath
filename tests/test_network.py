@@ -1,5 +1,5 @@
-from atosim.config import SlabConfig
-from atosim.network import (
+from catpath.config import SlabConfig
+from catpath.network import (
     build_ammonia_network,
     build_branching_network,
     build_network,

@@ -1,4 +1,4 @@
-# atosim — backlog / TODO
+# catpath — backlog / TODO
 
 Running list of deferred work so we don't forget. Newest asks captured; roughly
 priority-ordered within sections.
@@ -13,11 +13,11 @@ priority-ordered within sections.
   branches reachable with the allowed adatoms (reagent per supply link derived
   from stoichiometry). `[]` = dissociation only; omit = full template. CLI:
   `--reagents H,O`. Tests in `test_network.py`.
-- [x] **(c) Multi-substrate networks** — `atosim multi` runs several
+- [x] **(c) Multi-substrate networks** — `catpath multi` runs several
   `(substrate, target, network, reagents)` specs from `substrates:` and stacks
   them into one union-column energy map (NaN where a state is absent). See
   `multi.py`, `examples/multi_substrate.yaml`, `test_multi.py`.
-- [x] **(b) Intermediate autodetection** — `network: auto` (`src/atosim/explore.py`).
+- [x] **(b) Intermediate autodetection** — `network: auto` (`src/catpath/explore.py`).
   Rule-guided explorer over a molecular graph of the adsorbate: dissociate a
   heavy–heavy bond, supply a reagent adatom, bond it. Prunes by valence + atom
   budget + reachability to the target. Provably acyclic; step endpoints share an
@@ -26,15 +26,20 @@ priority-ordered within sections.
   `examples/auto_ammonia.yaml`, `tests/test_explore.py`. STILL OPEN below.
 
 ## Packaging & release ("ready for GitHub")
-- [ ] **Pick a better project name** before shipping to PyPI (atosim is a
-  placeholder; check name availability on PyPI/GitHub).
-- [ ] **pip installable** — it's already a hatchling project; add build/publish
-  (PyPI) and document `pip install atosim`. Write the **pip interface how-to**:
-  install, `atosim run ...`, minimal Python API example.
-- [ ] **README with finished graphs** — embed example profile / gallery / energy
-  map images; add badges, quickstart, screenshots.
-- [ ] **GitHub-ready** — LICENSE file, CI (GitHub Actions: pytest on EMT),
-  CONTRIBUTING, issue templates, tidy `.gitignore`.
+- [x] **Name chosen: `catpath`** (PyPI-available; package renamed atosim→catpath).
+- [x] **pip installable** — `pip install catpath` (+ `[mace]`/`[chgnet]`/
+  `[fairchem]`/`[grace]` extras). `uv build` → wheel+sdist verified; clean-venv
+  install runs the full pipeline end-to-end. GPL-3.0-or-later license + bundled
+  LICENSE. README has install/quickstart/CLI + `examples/README.md` how-to.
+- [x] **CI + trusted publishing** — `.github/workflows/ci.yml` (ruff + pytest on
+  EMT, Python 3.11/3.12) and `.github/workflows/workflow.yml` (OIDC trusted
+  publish to PyPI on release; env `pipy`, repo `retospect/catpath`).
+- [x] **README with graphs** — badges + cross-model hero image (`docs/img/`).
+- [ ] **Still open**: CONTRIBUTING.md, issue/PR templates; a minimal Python-API
+  usage example in the README; publish the first release (tag → the workflow
+  auto-publishes). Optionally embed a reaction-profile + gallery image too.
+- [ ] **First PyPI release** — create the `pipy` GitHub Environment (Settings →
+  Environments), tag `v0.1.0`, cut a GitHub Release; `workflow.yml` publishes.
 
 ## HPC / scale
 - [ ] **SLURM integration** — submit runs to a cluster. Snakemake has a native

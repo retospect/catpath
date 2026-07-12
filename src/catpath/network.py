@@ -364,7 +364,7 @@ def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
     """Build a reaction network.
 
     ``kind="auto"`` autodetects the intermediates from ``substrate`` -> ``target``
-    (rule-guided; see :mod:`atosim.explore`), bounded by ``max_extra`` (reagent
+    (rule-guided; see :mod:`catpath.explore`), bounded by ``max_extra`` (reagent
     atom budget) and ``max_states``; the curated template kinds ignore
     ``substrate``/``target``/``max_*`` and are filtered by ``reagents`` as before.
     """

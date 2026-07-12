@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv + Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # Base + dev deps only. The ML backends (mace/chgnet/fairchem/grace) are
+      # heavy, GPU-oriented, and mutually conflicting, so CI runs on the EMT
+      # backend, which exercises the whole pipeline with no torch.
+      - name: Install (base + dev)
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Test
+        run: pytest -q

@@ -1,6 +1,6 @@
-# Configuration reference — how you tell atosim what to do
+# Configuration reference — how you tell catpath what to do
 
-A run is **one YAML file**: `atosim run my.yaml`. Every field below, with the
+A run is **one YAML file**: `catpath run my.yaml`. Every field below, with the
 honest status of each "how many / which" axis you might want to control.
 
 ```yaml
@@ -62,10 +62,10 @@ selected.
 | backend | what | install | notes |
 |---|---|---|---|
 | `emt` | ASE Effective Medium Theory | *(none)* | **Not ML, not accurate** — dev/CI only. Pd Pt Cu Ni Ag Au Al C N O H. |
-| `mace` | MACE-MP-0 universal | `pip install atosim[mace]` | GPU; solid general default. |
-| `chgnet` | CHGNet universal | `pip install atosim[chgnet]` | CPU-friendly. |
-| `fairchem` | Meta FAIRChem / UMA | `pip install atosim[fairchem]` | Purpose-built for adsorbates-on-metals (OC20 task); UMA weights **license-gated** (HF login). |
-| `grace` | GRACE foundation models | `pip install atosim[grace]` | TensorFlow-based. |
+| `mace` | MACE-MP-0 universal | `pip install catpath[mace]` | GPU; solid general default. |
+| `chgnet` | CHGNet universal | `pip install catpath[chgnet]` | CPU-friendly. |
+| `fairchem` | Meta FAIRChem / UMA | `pip install catpath[fairchem]` | Purpose-built for adsorbates-on-metals (OC20 task); UMA weights **license-gated** (HF login). |
+| `grace` | GRACE foundation models | `pip install catpath[grace]` | TensorFlow-based. |
 | `auto` | best **installed** ML backend | — | resolves in order mace → fairchem → grace → chgnet. |
 
 The ML backends are *universal* (whole periodic table), so only EMT restricts
@@ -112,7 +112,7 @@ drops the reduction fork; `["H"]` does the reverse. Override at the CLI with
 new intermediates — it gates the curated ones by available reagent.
 
 ## §Intermediates — curated templates OR autodetected ✅
-Two ways to get a network. **Curated** templates in `src/atosim/network.py` are
+Two ways to get a network. **Curated** templates in `src/catpath/network.py` are
 hand-built and tuned; **`network: auto`** derives the intermediates from rules.
 
 ### Curated templates
@@ -126,8 +126,8 @@ To add/adjust intermediates you edit that file (add a `StateSpec` and a
 `StepSpec`). Geometries are hand-placed and tuned.
 
 ### `network: auto` — rule-guided autodetection
-Set `network: auto` and atosim **generates** the intermediates from
-`substrate` → `target` (see `src/atosim/explore.py`). It applies three
+Set `network: auto` and catpath **generates** the intermediates from
+`substrate` → `target` (see `src/catpath/explore.py`). It applies three
 elementary graph-rewrite rules to a molecular graph of the adsorbate:
 
 - **dissociate** (barriered step) — break one heavy–heavy bond; the byproduct
@@ -166,10 +166,10 @@ representative steps converge cleanly under a real NEB budget, though a curated
 template is still the tuned choice for a production run. `auto` is for
 **discovery/coverage** of the pathway space. Example: `examples/auto_ammonia.yaml`.
 
-## §Substrates — multi-substrate via `atosim multi` ✅
+## §Substrates — multi-substrate via `catpath multi` ✅
 Give `substrates:` a list of **spec dicts** (`{substrate, target, network,
 reagents}`; omitted fields inherit the top-level values) and run
-`atosim multi my.yaml`. Each entry gets its own full run + per-run artifacts,
+`catpath multi my.yaml`. Each entry gets its own full run + per-run artifacts,
 and all rows are stacked into one **union-column** energy map
 (`runs/<name>_multi/energy_map.png`): columns are the union of every network's
 states, cells are blank/`NaN` where a substrate never visits that state, and the
@@ -177,7 +177,7 @@ states, cells are blank/`NaN` where a substrate never visits that state, and the
 works and inherits the top-level target/network/reagents.
 
 Two other multi-row paths:
-- **`atosim sweep --elements Pd,Pt,Cu,Ni`** — same network across surfaces
+- **`catpath sweep --elements Pd,Pt,Cu,Ni`** — same network across surfaces
   (catalyst screen); columns align exactly (intersection).
 - Run once per substrate and combine the maps by hand.
 
@@ -192,7 +192,7 @@ Two other multi-row paths:
 Both use the **same fixed top+side cameras and zoom window** (computed from the
 adsorbate's projected centroid), so states stay directly comparable across
 backends. POV-Ray needs the binary (`sudo apt-get install -y povray`); if it is
-absent, atosim **prints a warning, records it in `results.json`, and falls back
+absent, catpath **prints a warning, records it in `results.json`, and falls back
 to matplotlib** — the run never fails. Override at the CLI is via the config
 `render:` block (no dedicated flag).
 
@@ -206,6 +206,6 @@ to matplotlib** — the run never fails. Override at the CLI is via the config
 | Models (how many / which) | `mlip.models: [...]` | ✅ first-class |
 | Reagents (which) | `reagents: [...]` (filters branches) | ✅ first-class |
 | Intermediates | `network:` template, or `network: auto` (rule-guided) | ✅ curated **and** autodetected |
-| Substrates (how many) | `substrates: [...]` + `atosim multi` | ✅ multi-substrate |
+| Substrates (how many) | `substrates: [...]` + `catpath multi` | ✅ multi-substrate |
 | Surface / lattice | `slab:` block (auto-relaxed) | ✅ first-class |
 | Rendering | `render.backend: matplotlib\|povray` | ✅ first-class (povray optional) |

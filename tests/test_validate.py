@@ -1,8 +1,8 @@
 import numpy as np
 
-from atosim.config import SlabConfig
-from atosim.structures import build_slab, place_fragments
-from atosim.validate import geometry_ok, is_similar, rmsd, sanitize_smiles
+from catpath.config import SlabConfig
+from catpath.structures import build_slab, place_fragments
+from catpath.validate import geometry_ok, is_similar, rmsd, sanitize_smiles
 
 
 def slab():

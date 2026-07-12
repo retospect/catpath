@@ -1,4 +1,4 @@
-"""atosim - reproducible ML-potential reaction pathway explorer."""
+"""catpath - reproducible ML-potential reaction pathway explorer."""
 
 from .config import Config
 

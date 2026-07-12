@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from atosim.config import Config, SlabConfig
-from atosim.multi import run_multi, write_multi
+from catpath.config import Config, SlabConfig
+from catpath.multi import run_multi, write_multi
 
 
 def tiny(tmp_path):

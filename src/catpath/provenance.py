@@ -28,7 +28,7 @@ def caption(cfg: Config, results) -> str:
         f"relax: BFGS (fmax {cfg.search.fmax} eV/A)  |  "
         f"TS: CI-NEB ({cfg.search.neb_images} images)  |  "
         f"{len(models)} model(s) x {len(cfg.search.seeds)} seed(s) = {n} samples  |  "
-        f"band / Ea+- = 1 s.d.  |  atosim v{__version__}"
+        f"band / Ea+- = 1 s.d.  |  catpath v{__version__}"
     )
 
 
@@ -44,7 +44,7 @@ def methods_text(cfg: Config, results) -> str:
 
 Reaction pathways for **{cfg.substrate} -> {cfg.target}** on a
 **{cfg.slab.element}({nx}x{ny}) {nz}-layer (111) slab** (bottom {cfg.slab.fix_layers}
-layers fixed, {cfg.slab.vacuum} A vacuum) were explored with the *atosim* pipeline
+layers fixed, {cfg.slab.vacuum} A vacuum) were explored with the *catpath* pipeline
 (v{__version__}). The `{cfg.network}` reaction network comprised {n_states} adsorbate
 states and {n_rxn} elementary steps.
 
@@ -69,7 +69,7 @@ def png_metadata(cfg: Config, results) -> dict[str, str]:
     """PNG tEXt chunks embedded in the image (machine-readable provenance)."""
     return {
         "Title": f"{cfg.substrate}->{cfg.target} on {cfg.slab.element} reaction profile",
-        "Software": f"atosim v{__version__}",
+        "Software": f"catpath v{__version__}",
         "Description": methods_text(cfg, results),
         "Comment": caption(cfg, results),
     }

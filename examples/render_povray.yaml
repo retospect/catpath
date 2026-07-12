@@ -1,6 +1,6 @@
 # Ray-traced (POV-Ray) active-site thumbnails/gallery instead of flat circles.
 # Requires the `povray` binary on PATH:  sudo apt-get install -y povray
-# If it is missing, atosim warns and falls back to the matplotlib backend, so
+# If it is missing, catpath warns and falls back to the matplotlib backend, so
 # this config always runs.
 name: nh3_povray
 substrate: "NO"

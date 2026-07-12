@@ -1,4 +1,4 @@
-"""atosim reaction-pathway pipeline, orchestrated by Snakemake.
+"""catpath reaction-pathway pipeline, orchestrated by Snakemake.
 
 The DAG fans out over seeds (one job per seed -> a partial JSON), then a single
 aggregate job combines them into the reaction graph + energy map.  This gives us
@@ -18,7 +18,7 @@ RUN_CFG = config["run_config"]
 SEEDS = config["seeds"]
 PARTIALS = config.get("partials_dir", "runs/partials")
 
-# read name/outdir from the atosim run config (plain load; we only touch strings)
+# read name/outdir from the catpath run config (plain load; we only touch strings)
 _c = yaml.safe_load(open(RUN_CFG)) or {}
 NAME = _c.get("name", "run")
 OUTDIR = _c.get("outdir", "runs")
@@ -37,7 +37,7 @@ rule seed:
     output:
         f"{PARTIALS}/{NAME}.seed{{seed}}.json",
     shell:
-        "atosim seed {RUN_CFG} --seed {wildcards.seed} --out {output}"
+        "catpath seed {RUN_CFG} --seed {wildcards.seed} --out {output}"
 
 
 rule aggregate:
@@ -49,4 +49,4 @@ rule aggregate:
         f"{OUTDIR}/{NAME}/energy_map.png",
         f"{OUTDIR}/{NAME}/graph.png",
     shell:
-        "atosim aggregate {RUN_CFG} --seeds {SEEDS_CSV} --partials {input}"
+        "catpath aggregate {RUN_CFG} --seeds {SEEDS_CSV} --partials {input}"

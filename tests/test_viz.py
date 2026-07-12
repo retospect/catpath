@@ -1,8 +1,8 @@
 import numpy as np
 
-from atosim.graph import build_graph
-from atosim.uncertainty import Estimate
-from atosim.viz import draw_graph, energy_map
+from catpath.graph import build_graph
+from catpath.uncertainty import Estimate
+from catpath.viz import draw_graph, energy_map
 
 
 def test_energy_map_writes_file(tmp_path):
@@ -20,7 +20,7 @@ def test_energy_map_handles_nan(tmp_path):
 
 
 def test_draw_profile_multi_pathway(tmp_path):
-    from atosim.viz import draw_profile
+    from catpath.viz import draw_profile
     # a small branching graph: A -> B -> C  and  A -> D
     nodes = {k: Estimate(v, 0.0, 3, []) for k, v in
              {"A": 0.0, "B": -0.2, "C": -0.5, "D": 0.1}.items()}

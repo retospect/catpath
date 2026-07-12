@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from atosim.config import Config
+from catpath.config import Config
 
 
 def test_defaults():

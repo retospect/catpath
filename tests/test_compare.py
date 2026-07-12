@@ -5,9 +5,9 @@ import json
 
 from pytest import approx
 
-from atosim import pipeline
-from atosim.config import Config, MLIPConfig, SlabConfig
-from atosim.viz import (
+from catpath import pipeline
+from catpath.config import Config, MLIPConfig, SlabConfig
+from catpath.viz import (
     _anchor_shift, _assign_columns, _ordered_names, compare_barriers, compare_boxplot,
 )
 

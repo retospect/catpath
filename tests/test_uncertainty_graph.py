@@ -1,7 +1,7 @@
 import json
 
-from atosim.graph import build_graph, to_csv, to_json
-from atosim.uncertainty import Estimate, aggregate, rankings_consistent
+from catpath.graph import build_graph, to_csv, to_json
+from catpath.uncertainty import Estimate, aggregate, rankings_consistent
 
 
 def test_aggregate_mean_std():

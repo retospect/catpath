@@ -2,12 +2,12 @@
 
 import numpy as np
 
-from atosim.config import Config
-from atosim.neb import linear_barrier
-from atosim.calculators import make_calculator
-from atosim.config import MLIPConfig, SlabConfig
-from atosim.structures import build_slab, place_fragments
-from atosim import pipeline
+from catpath.config import Config
+from catpath.neb import linear_barrier
+from catpath.calculators import make_calculator
+from catpath.config import MLIPConfig, SlabConfig
+from catpath.structures import build_slab, place_fragments
+from catpath import pipeline
 
 
 def tiny_cfg(tmp_path):

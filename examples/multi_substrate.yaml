@@ -1,5 +1,5 @@
 # Multi-substrate job: several (substrate -> target) networks in one run, stacked
-# into one union-column energy map.  Launch with:  atosim multi examples/multi_substrate.yaml
+# into one union-column energy map.  Launch with:  catpath multi examples/multi_substrate.yaml
 #
 # Each `substrates:` entry is a full spec; fields not given fall back to the
 # top-level target/network/reagents.  Different networks contribute different

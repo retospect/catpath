@@ -1,6 +1,6 @@
 # Autodetected reaction network (network: auto).
 #
-# Instead of a hand-curated template, atosim GENERATES the intermediates by
+# Instead of a hand-curated template, catpath GENERATES the intermediates by
 # applying elementary rules (dissociate a bond, supply a reagent adatom, bond
 # it) to a molecular graph of the adsorbate, then keeps only the states on a
 # path from the substrate to the target.  See docs/CONFIG.md 'Intermediates'.

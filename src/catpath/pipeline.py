@@ -153,7 +153,7 @@ def run_states(cfg: Config, log=print, reference: str = "formation") -> dict:
 
     One backend per call (the active env's), so several of these -- run in each
     backend's venv -- combine into a cross-model comparison via
-    :func:`atosim.viz.compare_boxplot`.
+    :func:`catpath.viz.compare_boxplot`.
 
     ``reference="formation"`` (default) reports each state as a formation energy
     vs gas-phase references + clean slab, computed *in this potential*, so

@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from atosim.config import Config, SlabConfig
-from atosim.sweep import run_sweep, write_sweep
+from catpath.config import Config, SlabConfig
+from catpath.sweep import run_sweep, write_sweep
 
 
 def tiny(tmp_path):

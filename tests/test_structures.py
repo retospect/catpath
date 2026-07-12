@@ -1,8 +1,8 @@
 import numpy as np
 from ase.constraints import FixAtoms
 
-from atosim.config import SlabConfig
-from atosim.structures import (
+from catpath.config import SlabConfig
+from catpath.structures import (
     build_slab,
     place_fragments,
     poses,

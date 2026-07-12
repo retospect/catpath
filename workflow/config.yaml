@@ -1,5 +1,5 @@
 # Snakemake orchestration config.
-# Points at an atosim run config and lists the seeds to fan out over.
+# Points at an catpath run config and lists the seeds to fan out over.
 run_config: "examples/no_to_no3_pd.yaml"
 seeds: [0, 1, 2]
 partials_dir: "runs/partials"

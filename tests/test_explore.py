@@ -9,10 +9,10 @@ interpolate).  No calculator is needed -- this is all graph + geometry.
 import networkx as nx
 import numpy as np
 
-from atosim import explore
-from atosim.config import SlabConfig
-from atosim.network import build_network
-from atosim.structures import build_slab
+from catpath import explore
+from catpath.config import SlabConfig
+from catpath.network import build_network
+from catpath.structures import build_slab
 
 _SLAB = SlabConfig(size=(2, 2, 3), vacuum=8.0)
 
@@ -178,8 +178,8 @@ def test_max_states_caps_exploration():
 
 
 def test_rough_energy_pruning_shrinks_and_keeps_target():
-    from atosim.config import MLIPConfig
-    from atosim.calculators import make_calculator
+    from catpath.config import MLIPConfig
+    from catpath.calculators import make_calculator
     full = build_network(SlabConfig(size=(2, 2, 3), vacuum=8.0),
                          "auto", substrate="NO", target="NH3")
     mk = lambda: make_calculator(MLIPConfig(backend="emt"))  # noqa: E731
@@ -190,8 +190,8 @@ def test_rough_energy_pruning_shrinks_and_keeps_target():
 
 
 def test_prune_skips_when_it_would_sever_target():
-    from atosim.config import MLIPConfig
-    from atosim.calculators import make_calculator
+    from catpath.config import MLIPConfig
+    from catpath.calculators import make_calculator
     full = build_network(SlabConfig(size=(2, 2, 3), vacuum=8.0),
                          "auto", substrate="NO", target="NH3")
     mk = lambda: make_calculator(MLIPConfig(backend="emt"))  # noqa: E731

@@ -10,12 +10,12 @@ an uninstalled backend costs nothing until you select it):
                  GPU.  **Not ML and not quantitatively accurate** - a dev/CI
                  placeholder to exercise the full pipeline.  Pd Pt Cu Ni Ag Au Al
                  C N O H only.
-* ``mace``     - MACE-MP-0 universal potential (``pip install atosim[mace]``).
-* ``chgnet``   - CHGNet universal potential (``pip install atosim[chgnet]``).
+* ``mace``     - MACE-MP-0 universal potential (``pip install catpath[mace]``).
+* ``chgnet``   - CHGNet universal potential (``pip install catpath[chgnet]``).
 * ``fairchem`` - Meta FAIRChem / UMA, purpose-built for adsorbates on metals via
-                 the OC20 task (``pip install atosim[fairchem]``; UMA weights are
+                 the OC20 task (``pip install catpath[fairchem]``; UMA weights are
                  license-gated -- needs a Hugging Face login).
-* ``grace``    - GRACE foundation models (``pip install atosim[grace]``).
+* ``grace``    - GRACE foundation models (``pip install catpath[grace]``).
 * ``auto``     - resolve to the best *installed* ML backend (see AUTO_ORDER);
                  raises if none is present rather than silently using EMT.
 
@@ -77,7 +77,7 @@ def resolve_backend(backend: str) -> str:
     for cand in AUTO_ORDER:
         if _installed(cand):
             return cand
-    hint = " ".join(f"atosim[{_EXTRA[b]}]" for b in AUTO_ORDER)
+    hint = " ".join(f"catpath[{_EXTRA[b]}]" for b in AUTO_ORDER)
     raise RuntimeError(
         "backend: auto found no ML potential installed. Install one of: "
         f"{hint} (or set backend: emt explicitly for a non-ML smoke test)."
@@ -114,7 +114,7 @@ def _load(backend: str, cfg: MLIPConfig):
     except ImportError as e:
         extra = _EXTRA.get(backend, backend)
         raise RuntimeError(
-            f"backend '{backend}' is not installed: pip install atosim[{extra}] "
+            f"backend '{backend}' is not installed: pip install catpath[{extra}] "
             f"(import failed: {e})"
         ) from e
     raise ValueError(f"unknown MLIP backend: {backend!r}")

@@ -1,11 +1,26 @@
 [project]
-name = "atosim"
+name = "catpath"
 version = "0.1.0"
-description = "Reproducible ML-potential reaction pathway explorer (first target: NO -> NO3 on Pd)"
+description = "Reaction-pathway explorer for catalyst surfaces with ML interatomic potentials: reaction networks, NEB barriers, and cross-model uncertainty."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [{ name = "Reto Stamm" }]
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Reto Stamm", email = "reto@retostamm.com" }]
+keywords = [
+    "catalysis", "reaction-network", "machine-learning-potential", "MLIP",
+    "NEB", "transition-state", "adsorption", "surface-chemistry", "ASE",
+    "computational-chemistry",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "numpy>=2.0",
     "scipy>=1.13",
@@ -37,15 +52,20 @@ dev = ["pytest>=8", "pytest-cov", "ruff"]
 conflicts = [[{ extra = "mace" }, { extra = "chgnet" },
               { extra = "fairchem" }, { extra = "grace" }]]
 
+[project.urls]
+Homepage = "https://github.com/retospect/catpath"
+Repository = "https://github.com/retospect/catpath"
+Issues = "https://github.com/retospect/catpath/issues"
+
 [project.scripts]
-atosim = "atosim.cli:main"
+catpath = "catpath.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/atosim"]
+packages = ["src/catpath"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
