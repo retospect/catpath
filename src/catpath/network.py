@@ -379,7 +379,9 @@ def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
         "ammonia": build_ammonia_network,
     }
     if kind not in builders:
-        raise ValueError(f"unknown network kind: {kind!r}")
+        raise ValueError(
+            f"unknown network {kind!r}; choose one of "
+            f"{', '.join([*builders, 'auto'])} (auto = autodetect intermediates)")
     net = builders[kind](slab_cfg)
     if reagents is not None:  # None = full template; a list (even []) filters
         net = filter_by_reagents(net, reagents)

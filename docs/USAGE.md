@@ -47,7 +47,10 @@ catpath compare --states s_*.json --out cmp.png   # merge → box plot per state
 catpath compare --states b_*.json --out bars.png  # barrier JSONs → Ea box plot, rate-limiting ringed
 catpath compare --states b_*.json --heights s_*.json --out ts.png  # TS heights, highest point starred
 catpath <cfg>                            # shorthand for `run`
-# overrides: --backend --models --seeds 0,1,2 --reagents H,O --device cuda --name --outdir
+catpath run --substrate NO --target NH3 --element Pd --network auto   # no config file
+# chemistry flags: --substrate --target --element --network
+# overrides:       --backend --models --seeds 0,1,2 --reagents H,O --device cuda --name --outdir
+# the config arg is optional; flags override whatever the file sets.
 ```
 
 ### Cross-model comparison (backends that can't share an env)

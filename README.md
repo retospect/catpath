@@ -22,10 +22,12 @@ uncertainty** — pooled across random seeds *and* across ML potentials.
 - **Reproducible** — every run writes a provenance snapshot; unstable results are
   flagged low-confidence rather than reported as precise numbers.
 
-![Cross-model comparison of intermediate formation energies](https://raw.githubusercontent.com/retospect/catpath/main/docs/img/models_intermediates.png)
+![NO→NH3 reaction energy profile on Pd](https://raw.githubusercontent.com/retospect/catpath/main/docs/img/energy_profile.png)
 
-*NO→NH₃ on Pd: formation energies of every intermediate under MACE, CHGNet, and
-UMA — the models agree on NO activation but diverge on deep hydrogenation.*
+*NO→NH₃ on Pd (MACE): every intermediate as a level line, transition states as
+barrier bumps with Ea, competing pathways in colour, ± uncertainty bands — one
+`catpath run`.* **→ more outputs and their commands in the
+[gallery](docs/GALLERY.md).**
 
 ## Install
 
@@ -48,12 +50,18 @@ pip install "catpath[grace]"     # GRACE foundation models
 ## Quickstart
 
 ```bash
-# whole pipeline (all seeds) on the dependency-free EMT backend:
+# no config file needed — set the chemistry on the command line:
+catpath run --substrate NO --target NH3 --element Pd --network auto
+
+# or point at a YAML config (see examples/):
 catpath run examples/no_to_no3_pd.yaml
 
-# let the intermediates be discovered automatically, on a real ML potential:
+# discover the intermediates automatically, on a real ML potential:
 catpath run examples/auto_ammonia.yaml --backend auto
 ```
+
+Run `catpath --help` (or `catpath run --help`) for every flag. Config files and
+flags mix freely — flags override the file.
 
 Outputs land in `runs/<name>/`:
 
@@ -81,10 +89,12 @@ catpath compare  --states b_*.json --out barriers.png          # Ea, rate-limiti
 catpath compare  --states b_*.json --heights s_*.json --out ts_heights.png
 ```
 
+![Cross-model comparison of intermediate formation energies](https://raw.githubusercontent.com/retospect/catpath/main/docs/img/models_intermediates.png)
+
 State energies are referenced to per-element gas-phase chemical potentials
 computed *in each potential*, so composition-changing states are comparable
-across models. See [`examples/README.md`](examples/README.md) for the full set of
-commands.
+across models. See the [gallery](docs/GALLERY.md) and
+[`examples/README.md`](examples/README.md) for the full set of commands.
 
 ## CLI
 

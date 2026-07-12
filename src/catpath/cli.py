@@ -1,11 +1,22 @@
-"""Command-line entry point.
+"""catpath — reaction-pathway explorer for catalyst surfaces with ML potentials.
 
-Subcommands (mirrored by the Snakemake rules):
-  catpath run <cfg>                     run all seeds in-process + write outputs
-  catpath seed <cfg> --seed N --out F   run ONE seed -> partial JSON (fan-out unit)
-  catpath aggregate <cfg> --partials .. combine partials -> outputs
+A run is one YAML config, OR just command-line flags (no file needed):
+
+  catpath run --substrate NO --target NH3 --element Pd --network auto
+  catpath run my.yaml --backend mace          # config file + overrides
+
+Commands:
+  run <cfg>          run all seeds in-process, write graph/energy-map/results
+  states <cfg>       relax states only (no NEB) -> per-model JSON  (for compare)
+  barriers <cfg>     NEB for every step        -> per-model JSON  (for compare)
+  compare --states.. box-plot several models   (states or barriers JSONs)
+  multi <cfg>        several substrates -> union energy map
+  sweep <cfg> --elements Pd,Pt,Cu   same network across surfaces
+  seed / aggregate   one-seed partial / combine partials (Snakemake fan-out)
 
 The bare form ``catpath <cfg>`` is shorthand for ``catpath run <cfg>``.
+Full field reference: docs/CONFIG.md. Every command takes the chemistry flags
+(--substrate/--target/--element/--network) and --backend/--device/--seeds/etc.
 """
 
 from __future__ import annotations
@@ -26,8 +37,45 @@ _COMMANDS = {"run", "seed", "aggregate", "sweep", "multi",
              "states", "barriers", "compare"}
 
 
+_NETWORKS = ("ammonia", "branching", "oxidation", "auto")
+
+
 def _load(args) -> Config:
-    cfg = Config.from_yaml(args.config) if args.config else Config()
+    path = getattr(args, "config", None)
+    if path:
+        p = Path(path)
+        if not p.exists():
+            raise SystemExit(
+                f"catpath: config file not found: {path}\n"
+                "  hint: pass a YAML file (see examples/), or run with NO file and set the\n"
+                "  chemistry on the CLI:\n"
+                "    catpath run --substrate NO --target NH3 --element Pd --network auto")
+        try:
+            cfg = Config.from_yaml(p)
+        except Exception as e:  # noqa: BLE001 - surface any loader error with a hint
+            raise SystemExit(
+                f"catpath: could not read config {path}: {e}\n"
+                "  hint: the file must be YAML. Quote chemical labels — `substrate: \"NO\"`,\n"
+                "  because a bare NO is YAML's boolean false. See docs/CONFIG.md.") from e
+    else:
+        cfg = Config()
+
+    # chemistry overrides — enough to run with no config file at all
+    if getattr(args, "substrate", None):
+        cfg.substrate = args.substrate
+        cfg.substrates = [args.substrate]
+    if getattr(args, "target", None):
+        cfg.target = args.target
+    if getattr(args, "element", None):
+        cfg.slab.element = args.element
+    if getattr(args, "network", None):
+        if args.network not in _NETWORKS:
+            raise SystemExit(
+                f"catpath: unknown network '{args.network}'.\n"
+                f"  hint: choose one of {', '.join(_NETWORKS)} "
+                "(auto = autodetect intermediates).")
+        cfg.network = args.network
+
     if getattr(args, "backend", None):
         cfg.mlip.backend = args.backend
     if getattr(args, "device", None):
@@ -35,7 +83,11 @@ def _load(args) -> Config:
     if getattr(args, "models", None):
         cfg.mlip.models = [m.strip() for m in args.models.split(",")]
     if getattr(args, "seeds", None):
-        cfg.search.seeds = [int(s) for s in args.seeds.split(",")]
+        try:
+            cfg.search.seeds = [int(s) for s in args.seeds.split(",")]
+        except ValueError:
+            raise SystemExit(f"catpath: --seeds must be integers, e.g. --seeds 0,1,2 "
+                             f"(got {args.seeds!r})") from None
     if getattr(args, "reagents", None) is not None:
         r = args.reagents.strip()
         cfg.reagents = [x.strip() for x in r.split(",") if x.strip()] if r else []
@@ -56,7 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("config", nargs="?", help="run config YAML")
+    common.add_argument("config", nargs="?",
+                        help="run config YAML (optional — omit and use the flags below)")
+    common.add_argument("--substrate", help='starting species, e.g. "NO" (no config needed)')
+    common.add_argument("--target", help='ending species, e.g. "NH3"')
+    common.add_argument("--element", help="catalyst surface element, e.g. Pd")
+    common.add_argument("--network",
+                        help="reaction network: ammonia|branching|oxidation|auto")
     common.add_argument("--backend",
                         help="override MLIP backend (emt|mace|chgnet|fairchem|grace|auto)")
     common.add_argument("--device", help="override compute device (cpu|cuda)")
