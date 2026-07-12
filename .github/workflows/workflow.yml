@@ -1,10 +1,10 @@
 # Publish catpath to PyPI via Trusted Publishing (OIDC) — no API token needed.
 #
 # This file's NAME (workflow.yml), the repo (retospect/catpath) and the
-# environment (pipy) must match the PyPI trusted-publisher configuration.
+# environment (pypi) must match the PyPI trusted-publisher configuration.
 # Trigger: publishing a GitHub Release.  Also runnable manually.
 #
-# One-time GitHub setup: create an Environment named `pipy`
+# One-time GitHub setup: create an Environment named `pypi`
 # (Settings -> Environments) — it may be auto-created on first run.
 name: Publish to PyPI
 
@@ -30,7 +30,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Must match the "Environment name" set in the PyPI trusted publisher.
-    environment: pipy
+    environment: pypi
     permissions:
       id-token: write        # OIDC token for trusted publishing (no password/token)
     steps:
