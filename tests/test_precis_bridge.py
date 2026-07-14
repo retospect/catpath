@@ -66,6 +66,31 @@ def test_chem_safe_yaml_keeps_NO_a_string() -> None:
     assert art["config"]["substrate"] == "NO"
 
 
+def test_network_topology_and_mermaid_no_compute() -> None:
+    # The "argue before you compute" surface: build the network (rule-based, no
+    # ML) and render it as text + mermaid.
+    from catpath.precis import runner
+    from catpath.precis.text_views import (
+        graph_to_mermaid,
+        topology_to_mermaid,
+        topology_to_text,
+    )
+
+    topo = runner.network_topology(_yaml_dict(SMOKE))
+    assert topo["states"] and topo["steps"]
+    assert "NO3" in {s["name"] for s in topo["states"]}  # target intermediate present
+    assert all("composition" in s for s in topo["states"])
+
+    mer = topology_to_mermaid(topo)
+    assert mer.startswith("flowchart LR") and "-->" in mer
+    txt = topology_to_text(topo)
+    assert "Intermediates" in txt and "Elementary steps" in txt
+
+    # a computed run renders with energies + barriers
+    gmer = graph_to_mermaid(runner.run_pathway_from_yaml(SMOKE)["graph_json"])
+    assert "Ea" in gmer and "eV" in gmer
+
+
 # --- handler: needs precis-mcp + a test DB ------------------------------
 _DSN = os.environ.get("PRECIS_TEST_PG_URL")
 
@@ -235,6 +260,41 @@ def test_handler_roundtrip() -> None:
 
         h.delete(id=slug)
         assert store.get_ref(kind="pathway", id=slug) is None
+    finally:
+        store.close()
+
+
+@pytest.mark.skipif(not _DSN, reason="needs PRECIS_TEST_PG_URL + precis-mcp")
+def test_preview_no_compute(monkeypatch) -> None:
+    pytest.importorskip("precis")
+    from precis.dispatch import Hub
+    from precis.store import Store
+
+    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
+    from catpath.precis import PathwayHandler
+
+    store = Store.connect(_DSN)
+    try:
+        _apply_migration(store)
+        hub = Hub(store=store)
+        h = PathwayHandler(hub=hub)
+        h._register_with(hub)
+        slug = "preview-test"
+        if store.get_ref(kind="pathway", id=slug):
+            h.delete(id=slug)
+
+        r = h.put(id="preview_test", text=SMOKE, mode="preview")
+        assert "previewed" in r.body and "mermaid" in r.body, r.body
+
+        ref = store.get_ref(kind="pathway", id=slug)
+        assert ref.meta["status"] == "preview"
+        assert ref.meta["topology"]["steps"], "topology not stored"
+        # views render on a preview (no results yet)
+        assert "flowchart" in h.get(id=slug, view="mermaid").body
+        assert "Intermediates" in h.get(id=slug, view="intermediates").body
+
+        h.delete(id=slug)
     finally:
         store.close()
 

@@ -64,7 +64,11 @@ class PathwayHandler(Handler):
         # so `put` can route the run to the pinned node instead of running it
         # in-process. Requires precis KindSpec.can_own_jobs (>= 8.22).
         can_own_jobs=True,
-        views=("network", "profile", "methods", "config"),
+        # 'preview' builds the reaction network cheaply (no ML compute) so the
+        # LLM can read + argue with the intermediates/steps before spending
+        # relax/NEB. Re-put without it to run.
+        modes=("preview",),
+        views=("intermediates", "mermaid", "network", "profile", "methods", "config"),
     )
 
     def __init__(self, *, hub: Hub) -> None:
@@ -89,6 +93,7 @@ class PathwayHandler(Handler):
         *,
         id: str | int | None = None,
         text: str | None = None,
+        mode: str | None = None,
         tags: list[str] | None = None,
         **_kw: Any,
     ) -> Response:
@@ -124,10 +129,14 @@ class PathwayHandler(Handler):
 
         store = self.hub.store
         existing = store.get_ref(kind="pathway", id=slug)
+
+        if mode == "preview":
+            return self._preview(store, slug, raw, effective, key, existing, tags)
+
         if (
             existing is not None
             and existing.meta.get("content_key") == key
-            and existing.meta.get("status") != "computing"
+            and existing.meta.get("status") == "ready"
         ):
             return Response(
                 body=(
@@ -272,10 +281,88 @@ class PathwayHandler(Handler):
             blocks = store.list_blocks_for_ref(ref.id)
             body = "\n\n".join(b.text for b in blocks if b.text)
             return Response(body=body or "(no methods)")
+        if v == "mermaid":
+            return Response(body=self._mermaid(meta))
+        if v == "intermediates":
+            return Response(body=self._intermediates(meta))
         if v == "network":
             return Response(body=self._render_network(ref.title, meta))
         # default / "profile"
         return Response(body=self._render_profile(ref.title, meta))
+
+    # -- preview (cheap, no compute) -------------------------------------
+    def _preview(
+        self,
+        store: Any,
+        slug: str,
+        raw_config: dict[str, Any],
+        effective: dict[str, Any],
+        key: str,
+        existing: Any,
+        tags: list[str] | None,
+    ) -> Response:
+        """Build the reaction network cheaply (rule-based, no ML) and store it
+        as a `status:preview` pathway so the LLM can read + argue with the
+        intermediates/steps before spending any relax/NEB compute."""
+        from . import runner
+        from .text_views import topology_to_mermaid, topology_to_text
+
+        topo = runner.network_topology(raw_config)
+        body = topology_to_text(topo)
+        seed_meta = {
+            "content_key": key,
+            "config": effective,
+            "topology": topo,
+            "status": "preview",
+            "slice": "1b",
+        }
+        title = f"{topo['substrate']} → {topo['target']} on {topo['element']} (preview)"
+        with store.tx() as conn:
+            if existing is None:
+                ref = store.insert_ref(
+                    kind="pathway", slug=slug, title=title, meta=seed_meta, conn=conn
+                )
+                store.insert_blocks(
+                    ref.id, [BlockInsert(pos=0, text=body, meta={"chunk_kind": BODY_KIND})],
+                    conn=conn,
+                )
+                ref_id = ref.id
+            else:
+                ref_id = existing.id
+                store.stamp_ref_meta(ref_id, seed_meta, conn=conn)
+                store.replace_body_chunk(ref_id, body, chunk_kind=BODY_KIND, conn=conn)
+            for t in tags or []:
+                self._add_tag(store, ref_id, t, conn)
+        return Response(
+            body=(
+                f"previewed '{slug}': {len(topo['states'])} intermediates, "
+                f"{len(topo['steps'])} steps — NO compute spent. Argue with it, "
+                f"edit, then re-put without mode='preview' to run.\n\n{body}\n\n"
+                f"```mermaid\n{topology_to_mermaid(topo)}\n```"
+            )
+        )
+
+    def _mermaid(self, meta: dict[str, Any]) -> str:
+        from . import runner
+        from .text_views import graph_to_mermaid, topology_to_mermaid
+
+        if meta.get("graph"):
+            return "```mermaid\n" + graph_to_mermaid(meta["graph"]) + "\n```"
+        topo = meta.get("topology") or (
+            runner.network_topology(meta["config"]) if meta.get("config") else None
+        )
+        if topo:
+            return "```mermaid\n" + topology_to_mermaid(topo) + "\n```"
+        return "(no network to render)"
+
+    def _intermediates(self, meta: dict[str, Any]) -> str:
+        from . import runner
+        from .text_views import topology_to_text
+
+        topo = meta.get("topology") or (
+            runner.network_topology(meta["config"]) if meta.get("config") else None
+        )
+        return topology_to_text(topo) if topo else "(no network)"
 
     # -- delete ----------------------------------------------------------
     def delete(  # type: ignore[override]

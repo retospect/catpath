@@ -29,6 +29,47 @@ from ..pipeline import Results, g_has_edge, run
 from .. import provenance
 
 
+def network_topology(config: dict[str, Any]) -> dict[str, Any]:
+    """Build the reaction network **cheaply** (rule-based, NO ML) and return its
+    structure as plain data: intermediates (with composition), atom-conserving
+    elementary steps, and stoichiometry supply links.
+
+    This is the "argue before you compute" surface — the LLM can inspect and
+    contest the network (is this intermediate real? is this step right?) before
+    any relax/NEB is spent. No slab is built and no calculator is loaded, so it
+    is fast and dependency-light (ASE/RDKit only, no potential)."""
+    from ..network import build_network
+
+    cfg = Config.from_dict(config)
+    net = build_network(
+        cfg.slab, cfg.network, cfg.reagents, cfg.substrate, cfg.target,
+        max_extra=cfg.auto.max_extra, max_states=cfg.auto.max_states,
+    )
+    states = net.states()
+    order = net.order()
+    return {
+        "strategy": cfg.network,
+        "substrate": cfg.substrate,
+        "target": cfg.target,
+        "element": cfg.slab.element,
+        "order": order,
+        "states": [
+            {
+                "name": n,
+                "label": states[n].label,
+                "composition": dict(states[n].adsorbate_counts()),
+            }
+            for n in order
+            if n in states
+        ],
+        "steps": [
+            {"name": s.name, "reactant": s.reactant.name, "product": s.product.name}
+            for s in net.steps
+        ],
+        "links": [{"reactant": a, "product": b} for a, b in net.links],
+    }
+
+
 def _prep(config: dict[str, Any], force_backend: str | None) -> Config:
     """Build the Config, applying a backend override (used by the run and by
     the cache-key computation so they never diverge)."""
