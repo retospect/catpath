@@ -195,6 +195,15 @@ class _FakeCtx:
         self.status = s
 
 
+def test_pathway_skill_discoverable() -> None:
+    pytest.importorskip("precis")  # skill served via the precis.skills entry point
+    import precis.handlers.skill as sk
+
+    sk._SKILLS_MAP_CACHE = None  # re-scan so the installed plugin root is seen
+    body = sk._load_skills_map().get("precis-pathway-help", "")
+    assert body and "view='compare'" in body and "rate-limiting" in body
+
+
 @pytest.mark.skipif(not _DSN, reason="needs PRECIS_TEST_PG_URL + precis-mcp")
 def test_catpath_explore_dispatch_writes_back() -> None:
     pytest.importorskip("precis")
