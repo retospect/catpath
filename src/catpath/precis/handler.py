@@ -68,7 +68,10 @@ class PathwayHandler(Handler):
         # LLM can read + argue with the intermediates/steps before spending
         # relax/NEB. Re-put without it to run.
         modes=("preview",),
-        views=("intermediates", "mermaid", "network", "profile", "methods", "config"),
+        views=(
+            "analysis", "compare", "intermediates", "steps", "warnings",
+            "profile", "mermaid", "network", "methods", "config",
+        ),
     )
 
     def __init__(self, *, hub: Hub) -> None:
@@ -283,12 +286,89 @@ class PathwayHandler(Handler):
             return Response(body=body or "(no methods)")
         if v == "mermaid":
             return Response(body=self._mermaid(meta))
+        if v == "compare":
+            return Response(body=self._compare(store, ref, meta))
+
+        computed = bool(meta.get("graph"))
+        if v in ("analysis", "steps", "warnings") and not computed:
+            return Response(
+                body=f"pathway '{id}' not computed yet (status "
+                f"{meta.get('status', '?')}). Run it (put without mode='preview') "
+                "first, then read this view."
+            )
+        if v == "analysis":
+            from .toon_views import analysis_text
+
+            return Response(body=analysis_text(meta))
+        if v == "steps":
+            from .toon_views import steps_toon
+
+            return Response(body=steps_toon(meta))
+        if v == "warnings":
+            from .toon_views import warnings_toon
+
+            return Response(body=warnings_toon(meta))
         if v == "intermediates":
-            return Response(body=self._intermediates(meta))
+            if computed:
+                from .toon_views import intermediates_toon
+
+                return Response(body=intermediates_toon(meta))
+            return Response(body=self._intermediates(meta))  # preview topology
         if v == "network":
             return Response(body=self._render_network(ref.title, meta))
-        # default / "profile"
+        if v == "profile":
+            return Response(body=self._render_profile(ref.title, meta))
+        # default (no view): analysis if computed, else the preview/profile text
+        if computed:
+            from .toon_views import analysis_text
+
+            return Response(body=analysis_text(meta))
         return Response(body=self._render_profile(ref.title, meta))
+
+    # -- compare (cross-candidate) ---------------------------------------
+    def _compare(self, store: Any, ref: Any, meta: dict[str, Any]) -> str:
+        """Compare this pathway against every computed sibling sharing the same
+        substrate→target (same reaction), as one interleaved TOON table."""
+        from . import analysis
+        from .toon_views import compare_toon
+
+        r = meta.get("results", {})
+        substrate, target = r.get("substrate"), r.get("target")
+        if not substrate or not target:
+            return "cannot compare: this pathway has no computed results yet."
+        with store.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT slug_id.id_value, refs.meta FROM refs "
+                "LEFT JOIN ref_identifiers slug_id "
+                "  ON slug_id.ref_id = refs.ref_id AND slug_id.id_kind = 'cite_key' "
+                "WHERE refs.kind = 'pathway' AND refs.deleted_at IS NULL "
+                "  AND refs.meta->'results'->>'substrate' = %s "
+                "  AND refs.meta->'results'->>'target' = %s "
+                "  AND refs.meta->>'status' = 'ready'",
+                (substrate, target),
+            ).fetchall()
+        candidates = []
+        for slug, m in rows:
+            g = (m or {}).get("graph")
+            if not g:
+                continue
+            c_root, c_target = analysis.roots(g, m.get("results", {}))
+            candidates.append(
+                {
+                    "slug": slug or "?",
+                    "lever": (m.get("config") or {}).get("slab", {}).get("element", "?"),
+                    "graph": g,
+                    "root": c_root,
+                    "target": c_target,
+                }
+            )
+        if len(candidates) < 2:
+            return (
+                f"only 1 computed pathway for {substrate}→{target}; nothing to "
+                "compare yet. Run variants (different surface/dopant) to build a "
+                "leaderboard."
+            )
+        return compare_toon(candidates)
 
     # -- preview (cheap, no compute) -------------------------------------
     def _preview(

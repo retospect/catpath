@@ -91,6 +91,69 @@ def test_network_topology_and_mermaid_no_compute() -> None:
     assert "Ea" in gmer and "eV" in gmer
 
 
+# Branching network — connected (supply bridges), so it has a real root→target
+# path and exercises the interleaved profile / compare. The linear `oxidation`
+# SMOKE is disconnected (rate-limiting still works via max-over-edges fallback).
+BRANCH = """
+name: branch_smoke
+substrate: "NO"
+target: "NO3"
+network: branching
+slab: {element: Pd, size: [2, 2, 3], vacuum: 8.0, fix_layers: 1, relax_lattice: false}
+mlip: {backend: emt}
+search: {seeds: [0], neb_images: 3, neb_max_steps: 12, neb_retries: 0, max_steps: 30, pose_count: 2}
+"""
+
+
+def test_analysis_over_computed_graph() -> None:
+    from catpath.precis import analysis, runner
+
+    art = runner.run_pathway_from_yaml(BRANCH)
+    g, res = art["graph_json"], art["results_json"]
+    root, target = analysis.roots(g, res)
+    assert root in {n["id"] for n in g["nodes"]}  # root is a real node, not the label
+
+    rl = analysis.rate_limiting(g, root, target)
+    assert rl and rl["ea"] is not None and "→" in rl["step"]
+
+    span = analysis.energetic_span(g, root, target)
+    assert span is not None and span >= 0.0
+
+    ranked = analysis.barriers_ranked(g)
+    eas = [r["ea"] for r in ranked]
+    assert eas == sorted(eas, reverse=True)  # highest barrier first
+
+    path, cols = analysis.profile_positions(g, root, target)
+    assert path and cols[0]["kind"] == "state"
+    assert any(c["kind"] == "ts" for c in cols)  # ≥1 barrier column on the path
+
+
+def test_toon_views_and_aligned_compare() -> None:
+    pytest.importorskip("precis")  # toon_views uses precis.format.toon
+    from catpath.precis import analysis, runner, toon_views
+
+    a1 = runner.run_pathway_from_yaml(BRANCH)
+    meta = {"graph": a1["graph_json"], "results": a1["results_json"],
+            "warnings": a1["warnings"]}
+    assert toon_views.intermediates_toon(meta).startswith("{state")
+    assert "Ea_eV" in toon_views.steps_toon(meta)
+    ana = toon_views.analysis_text(meta)
+    assert "rate-limiting" in ana and "barriers (descending)" in ana
+
+    # aligned interleaved compare: two candidates sharing the branching network
+    a2 = runner.run_pathway_from_yaml(BRANCH.replace("element: Pd", "element: Pt"))
+
+    def _cand(slug: str, art: dict, el: str) -> dict:
+        g, res = art["graph_json"], art["results_json"]
+        r, t = analysis.roots(g, res)
+        return {"slug": slug, "lever": el, "graph": g, "root": r, "target": t}
+
+    out = toon_views.compare_toon([_cand("pd", a1, "Pd"), _cand("pt", a2, "Pt")])
+    assert "RATE" in out and "SPAN" in out
+    assert "‡" in out  # aligned → barrier columns present (not the scalar fallback)
+    assert "pd" in out and "pt" in out
+
+
 # --- handler: needs precis-mcp + a test DB ------------------------------
 _DSN = os.environ.get("PRECIS_TEST_PG_URL")
 
@@ -295,6 +358,39 @@ def test_preview_no_compute(monkeypatch) -> None:
         assert "Intermediates" in h.get(id=slug, view="intermediates").body
 
         h.delete(id=slug)
+    finally:
+        store.close()
+
+
+@pytest.mark.skipif(not _DSN, reason="needs PRECIS_TEST_PG_URL + precis-mcp")
+def test_compare_view(monkeypatch) -> None:
+    pytest.importorskip("precis")
+    from precis.dispatch import Hub
+    from precis.store import Store
+
+    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
+    from catpath.precis import PathwayHandler
+
+    store = Store.connect(_DSN)
+    try:
+        _apply_migration(store)
+        hub = Hub(store=store)
+        h = PathwayHandler(hub=hub)
+        h._register_with(hub)
+        for slug in ("cmp-pd", "cmp-pt"):
+            if store.get_ref(kind="pathway", id=slug):
+                h.delete(id=slug)
+
+        h.put(id="cmp_pd", text=BRANCH)  # element Pd, branching (connected)
+        h.put(id="cmp_pt", text=BRANCH.replace("element: Pd", "element: Pt"))
+
+        out = h.get(id="cmp-pd", view="compare").body
+        assert "RATE" in out and "SPAN" in out, out
+        assert "cmp-pd" in out and "cmp-pt" in out, out  # both candidates present
+
+        h.delete(id="cmp-pd")
+        h.delete(id="cmp-pt")
     finally:
         store.close()
 
