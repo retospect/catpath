@@ -42,6 +42,10 @@ chgnet = ["torch", "chgnet", "nvidia-cuda-nvrtc-cu12>=12.9"]
 fairchem = ["torch", "fairchem-core", "nvidia-cuda-nvrtc-cu12>=12.9"]  # UMA weights HF-gated
 grace = ["tensorpotential"]                    # TensorFlow-based
 orchestration = ["snakemake>=8"]
+# precis-mcp bridge: the `pathway` kind plugin (catpath.precis). Install
+# alongside precis-mcp on a node that hosts the MCP server / worker. The
+# plugin surface (Handler/KindSpec/entry points) is frozen since precis v6.
+precis = ["precis-mcp>=8.21,<9"]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
 
 # These ML backends have incompatible transitive pins (e.g. mace-torch needs
@@ -60,12 +64,26 @@ Issues = "https://github.com/retospect/catpath/issues"
 [project.scripts]
 catpath = "catpath.cli:main"
 
+# precis-mcp plugin discovery (only active when precis-mcp is installed in
+# the same environment; harmless metadata otherwise). See catpath.precis.
+[project.entry-points."precis.handlers"]
+pathway = "catpath.precis:PathwayHandler"
+
+[project.entry-points."precis.migrations"]
+catpath = "catpath.precis.migrations"
+
+[project.entry-points."precis.job_types"]
+catpath_explore = "catpath.precis.job:load"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/catpath"]
+# Ensure the plugin migration SQL ships in the wheel (precis discovers it
+# via the precis.migrations entry point at runtime).
+artifacts = ["src/catpath/precis/migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
