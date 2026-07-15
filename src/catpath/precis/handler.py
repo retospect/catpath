@@ -30,7 +30,7 @@ from precis.protocol import Handler, KindSpec
 from precis.response import Response
 from precis.store.types import BlockInsert
 
-from .persist import BODY_KIND, pathway_meta, pathway_title, persist_result
+from .persist import BODY_KIND, pathway_title, persist_result
 
 #: When set, `put` routes the compute to a `catpath_explore` job pinned to this
 #: node instead of running catpath in-process (slice 1). The gateway sets it to
@@ -155,28 +155,23 @@ class PathwayHandler(Handler):
 
         # In-process on EMT (slice 0). Synchronous — keep demo configs small.
         artifact = runner.run_pathway_from_yaml(text, force_backend="emt")
-        with store.tx() as conn:
-            if existing is None:
+        if existing is None:
+            with store.tx() as conn:
                 ref = store.insert_ref(
-                    kind="pathway",
-                    slug=slug,
-                    title=pathway_title(artifact),
-                    meta=pathway_meta(artifact, extra={"backend_forced": "emt", "slice": 0}),
-                    conn=conn,
+                    kind="pathway", slug=slug, title=pathway_title(artifact),
+                    meta={"status": "computing"}, conn=conn,
                 )
-                store.insert_blocks(
-                    ref.id,
-                    [BlockInsert(pos=0, text=artifact["methods_md"],
-                                 meta={"chunk_kind": BODY_KIND})],
-                    conn=conn,
-                )
-                ref_id, verb = ref.id, "created"
-            else:
-                ref_id, verb = existing.id, "regenerated"
-                persist_result(store, ref_id, artifact,
-                               extra_meta={"backend_forced": "emt", "slice": 0}, conn=conn)
-            for t in tags or []:
-                self._add_tag(store, ref_id, t, conn)
+            ref_id, verb = ref.id, "created"
+        else:
+            ref_id, verb = existing.id, "regenerated"
+        # persist_result stamps the full meta, (re)writes the methods body, and
+        # ingests each intermediate as a linked `structure` ref (slice 1b).
+        persist_result(store, ref_id, artifact, pathway_slug=slug,
+                       extra_meta={"backend_forced": "emt", "slice": 0})
+        if tags:
+            with store.tx() as conn:
+                for t in tags:
+                    self._add_tag(store, ref_id, t, conn)
 
         return Response(body=self._put_summary(slug, verb, artifact))
 
@@ -237,6 +232,7 @@ class PathwayHandler(Handler):
             idem_key=f"catpath_explore:{key}",
             params={
                 "pathway_ref_id": ref_id,
+                "pathway_slug": slug,
                 "config": raw_config,
                 "force_backend": force,  # None → run the config's own backend
                 "content_key": key,

@@ -46,13 +46,33 @@ def persist_result(
     ref_id: int,
     artifact: dict[str, Any],
     *,
+    pathway_slug: str | None = None,
+    ingest: bool = True,
     extra_meta: dict[str, Any] | None = None,
     conn: Any = None,
 ) -> None:
-    """Stamp the pathway ref's meta and (re)write its methods body chunk. The
-    ref must already exist. Runs in its own transaction unless a `conn` is
-    supplied (so a caller can fold it into an outer tx)."""
-    meta = pathway_meta(artifact, extra=extra_meta)
+    """Stamp the pathway ref's meta and (re)write its methods body chunk, and
+    (slice 1b) ingest each relaxed intermediate as a `structure` ref linked back
+    to the pathway. The ref must already exist. Runs in its own transaction
+    unless a `conn` is supplied.
+
+    Structure ingest runs *before* the meta stamp (it opens its own
+    transactions via `structure_save`) so the resulting `{state → ref_id}` map
+    lands in the same meta. Best-effort — an ingest failure never blocks the
+    core result write-back."""
+    extra = dict(extra_meta or {})
+    if ingest and pathway_slug and artifact.get("structures_extxyz"):
+        try:
+            from .ingest import ingest_intermediates
+
+            extra["structure_refs"] = ingest_intermediates(
+                store, ref_id, pathway_slug, artifact["content_key"],
+                artifact["structures_extxyz"],
+            )
+        except Exception:
+            pass  # native ingest is additive; keep the pathway result regardless
+
+    meta = pathway_meta(artifact, extra=extra)
 
     def _do(c: Any) -> None:
         store.stamp_ref_meta(ref_id, meta, conn=c)

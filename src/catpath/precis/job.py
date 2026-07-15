@@ -89,6 +89,7 @@ def _dispatch(ctx: Any, spec: Any) -> None:
             ctx.store,
             pathway_ref_id,
             artifact,
+            pathway_slug=params.get("pathway_slug"),
             extra_meta={"produced_by": NAME, "slice": 1, "ran_on": params.get("target_node")},
         )
     except Exception as exc:

@@ -404,6 +404,53 @@ def test_compare_view(monkeypatch) -> None:
         store.close()
 
 
+@pytest.mark.skipif(not _DSN, reason="needs PRECIS_TEST_PG_URL + precis-mcp")
+def test_native_structure_ingest(monkeypatch) -> None:
+    pytest.importorskip("precis")
+    from precis.dispatch import Hub
+    from precis.store import Store
+
+    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
+    from catpath.precis import PathwayHandler
+
+    store = Store.connect(_DSN)
+    try:
+        _apply_migration(store)
+        hub = Hub(store=store)
+        h = PathwayHandler(hub=hub)
+        h._register_with(hub)
+        slug = "ingest-test"
+        if store.get_ref(kind="pathway", id=slug):
+            h.delete(id=slug)
+
+        h.put(id="ingest_test", text=SMOKE)
+        ref = store.get_ref(kind="pathway", id=slug)
+        srefs = ref.meta.get("structure_refs") or {}
+        assert srefs, "no structure refs ingested"
+        assert set(srefs) <= set(ref.meta["results"]["pathway"])  # one per state
+
+        sid = next(iter(srefs.values()))
+        with store.pool.connection() as c:
+            kind = c.execute(
+                "SELECT kind FROM refs WHERE ref_id=%s AND deleted_at IS NULL", (sid,)
+            ).fetchone()
+            (natoms,) = c.execute(
+                "SELECT count(*) FROM struct_atoms WHERE ref_id=%s AND retired_version IS NULL",
+                (sid,),
+            ).fetchone()
+        assert kind and kind[0] == "structure"
+        assert natoms > 0, "structure ref has no atoms"
+
+        # linked back to the pathway
+        links = store.links_for(ref.id, direction="out", relation="related-to")
+        assert any(getattr(link, "dst_ref_id", None) == sid for link in links)
+
+        h.delete(id=slug)
+    finally:
+        store.close()
+
+
 @pytest.mark.skipif(not _DSN, reason="needs precis-mcp")
 def test_handler_gated_off_by_default() -> None:
     pytest.importorskip("precis")
