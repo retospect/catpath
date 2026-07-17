@@ -1,11 +1,13 @@
 from catpath.config import SlabConfig
 from catpath.network import (
+    Network,
     build_ammonia_network,
     build_branching_network,
     build_network,
     build_oxidation_network,
     filter_by_reagents,
 )
+from catpath.structures import build_slab, place_fragments
 
 _SLAB = SlabConfig(size=(2, 2, 3))
 
@@ -112,3 +114,43 @@ def test_filtered_steps_still_atom_conserving():
     for step in net.steps:
         r, p = step.reactant.build(slab), step.product.build(slab)
         assert sorted(r.get_chemical_symbols()) == sorted(p.get_chemical_symbols())
+
+
+# --- injected-slab seam (the precis `structure` input; Slice 2) --------------
+
+
+def test_injected_slab_is_scored_not_rebuilt():
+    """`net.slab()` returns the supplied slab (a copy), not an fcc111 rebuild."""
+    prepared = build_slab(SlabConfig(element="Pd", size=(2, 2, 3)))
+    prepared.info["marker"] = "precis-owned"
+    net = Network(SlabConfig(element="Pd", size=(2, 2, 3)), prebuilt_slab=prepared)
+    got = net.slab()
+    assert got.info.get("marker") == "precis-owned"  # it's the injected slab
+    assert len(got) == len(prepared)
+    assert got.get_chemical_formula() == prepared.get_chemical_formula()
+    assert got.info["n_slab"] == len(prepared)
+    # a copy — mutating the result must not touch the caller's Atoms
+    got.info["marker"] = "mutated"
+    assert prepared.info["marker"] == "precis-owned"
+
+
+def test_injected_slab_missing_adsorbate_info_still_places_fragments():
+    """A prepared slab that lost `adsorbate_info` (e.g. an extxyz round-trip)
+    gets it transplanted from the cfg reference, so named-site placement works."""
+    cfg = SlabConfig(element="Pd", size=(2, 2, 3))
+    prepared = build_slab(cfg)
+    prepared.info.pop("adsorbate_info", None)  # simulate the round-trip loss
+    net = Network(cfg, prebuilt_slab=prepared)
+    slab = net.slab()
+    assert "adsorbate_info" in slab.info  # transplanted
+    # placement at a named high-symmetry site now resolves + appends the atom
+    placed = place_fragments(slab, [{"symbol": "O", "site": "fcc", "height": 2.0}])
+    assert len(placed) == len(prepared) + 1
+    assert "O" in placed.get_chemical_symbols()
+
+
+def test_no_injection_builds_from_label_as_before():
+    net = Network(SlabConfig(element="Pd", size=(2, 2, 3)))
+    slab = net.slab()
+    assert "adsorbate_info" in slab.info
+    assert set(slab.get_chemical_symbols()) == {"Pd"}

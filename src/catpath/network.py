@@ -61,9 +61,35 @@ class Network:
     slab_cfg: SlabConfig
     steps: list[StepSpec] = field(default_factory=list)
     links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
+    #: An externally-prepared slab to score *instead of* building one from
+    #: ``slab_cfg`` (the precis ``structure`` seam — the caller owns the
+    #: geometry: alloy / adatom / facet / constraints). ``None`` = build from
+    #: the label, as before. See :meth:`slab`.
+    prebuilt_slab: Atoms | None = None
 
     def slab(self) -> Atoms:
-        return build_slab(self.slab_cfg)
+        """The slab to run the reaction on.
+
+        When a ``prebuilt_slab`` was injected we score *that* (a copy, so the
+        caller's Atoms is never mutated) rather than building an fcc(111) slab
+        from ``slab_cfg``. A prepared slab may lack ASE's ``adsorbate_info``
+        (an extxyz round-trip drops that nested dict), which the named-site
+        placement (``fcc``/``hcp``/``top``) needs; for the clean-fcc(111) first
+        cut we transplant it from a reference slab built at the same ``slab_cfg``
+        so placement still resolves. Edited/arbitrary slabs place adsorbates at
+        an explicit anchor instead (the precis ``eye`` active-site, §7.5).
+        """
+        if self.prebuilt_slab is None:
+            return build_slab(self.slab_cfg)
+        s = self.prebuilt_slab.copy()
+        if "n_slab" not in s.info:
+            s.info["n_slab"] = len(s)
+        if "adsorbate_info" not in s.info:
+            ref = build_slab(self.slab_cfg)
+            info = ref.info.get("adsorbate_info")
+            if info is not None:
+                s.info["adsorbate_info"] = info
+        return s
 
     def states(self) -> dict[str, StateSpec]:
         out: dict[str, StateSpec] = {}

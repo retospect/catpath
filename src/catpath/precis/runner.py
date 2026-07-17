@@ -166,18 +166,36 @@ def _structures_extxyz(results: Results) -> dict[str, str]:
     return out
 
 
+def _hydrate_slab(slab_extxyz: str) -> Any:
+    """Parse an extxyz string (one frame) into an ASE ``Atoms`` slab.
+
+    extxyz is the wire form the precis ``structure`` seam hands us — lossless
+    for cell / pbc / positions / constraints, and JSON-embeddable as a string,
+    so ``run_pathway`` keeps its "plain data in, plain data out" contract.
+    """
+    from ase.io import read as ase_read
+
+    atoms = ase_read(io.StringIO(slab_extxyz), format="extxyz", index=0)
+    return atoms
+
+
 def run_pathway(
     config: dict[str, Any],
     *,
     force_backend: str | None = None,
+    slab_extxyz: str | None = None,
     log: Any = lambda *a, **k: None,
 ) -> dict[str, Any]:
     """Run catpath in-process and return a self-contained artifact.
 
     ``config`` is the parsed pathway YAML (a plain dict). ``force_backend``
     overrides ``mlip.backend`` (slice 0 pins ``emt`` so an unconfigured or
-    heavy-backend request still runs the cheap in-process path). ``log`` is
-    a catpath-style logging callable (default: silent).
+    heavy-backend request still runs the cheap in-process path).
+    ``slab_extxyz`` (optional) is an externally-prepared slab — the precis
+    ``structure`` seam: when given, catpath scores *that* slab instead of
+    building an fcc(111) one from the config label, and the reaction's
+    adsorbates are placed on it (clean-fcc(111) first cut). ``log`` is a
+    catpath-style logging callable (default: silent).
 
     The returned dict is JSON-serialisable end to end (no ASE ``Atoms``
     leak into it) and carries everything the handler persists:
@@ -193,6 +211,12 @@ def run_pathway(
     # Key on the EFFECTIVE config (post-override) so the cache address
     # matches what actually ran — not the raw request.
     effective = cfg.to_dict()
+    if slab_extxyz is not None:
+        # Side-channel: a runtime attr `_build_net` stamps onto the Network.
+        # Not a dataclass field, so it stays out of `effective`/content_key —
+        # the injected geometry addresses via `config.slab.structure_ref`
+        # (set by the caller) rather than the Atoms bytes.
+        cfg._prebuilt_slab = _hydrate_slab(slab_extxyz)  # type: ignore[attr-defined]
     results = run(cfg, log=log)
 
     return {

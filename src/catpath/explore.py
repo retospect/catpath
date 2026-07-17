@@ -436,7 +436,6 @@ def prune_by_rough_energy(net: Network, make_calc, target: str, threshold: float
     always retain at least one substrate->target path.
     """
     from .relax import pre_relax
-    from .structures import build_slab
 
     order = net.order()
     if not order:
@@ -446,7 +445,7 @@ def prune_by_rough_energy(net: Network, make_calc, target: str, threshold: float
     goal_name = _target_state_name(target)
     goals = {n for n in states if goal_name in n.split("+")}
 
-    slab = build_slab(net.slab_cfg)
+    slab = net.slab()  # honours an injected prebuilt_slab (the precis structure seam)
     energy: dict[str, float] = {}
     for name, st in states.items():
         atoms = pre_relax(st.build(slab), make_calc(), max_steps=prerelax_steps)

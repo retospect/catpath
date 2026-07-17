@@ -54,6 +54,11 @@ def _build_net(cfg: Config, log=lambda *a, **k: None) -> Network:
     net = build_network(cfg.slab, cfg.network, cfg.reagents, cfg.substrate,
                         cfg.target, max_extra=cfg.auto.max_extra,
                         max_states=cfg.auto.max_states)
+    # Injected slab (the precis `structure` seam) travels on cfg as a runtime
+    # side-channel — not a dataclass field, so it never leaks into
+    # to_dict/snapshot/content_key. Every build path funnels through here, so
+    # stamping it once reaches all `net.slab()` call sites.
+    net.prebuilt_slab = getattr(cfg, "_prebuilt_slab", None)
     if cfg.network == "auto" and cfg.auto.prune_energy is not None:
         from .explore import prune_by_rough_energy
         net = prune_by_rough_energy(net, lambda: make_calculator(cfg.mlip),
@@ -339,8 +344,11 @@ def run(cfg: Config, log=print) -> Results:
         tag = f"{backend}:{model}" if model else backend
         c = copy.deepcopy(cfg)
         c.mlip.backend, c.mlip.model, c.mlip.models = backend, model, []
-        # relax the bulk lattice constant to THIS potential (removes epitaxial strain)
-        if c.slab.relax_lattice and c.slab.a is None:
+        # relax the bulk lattice constant to THIS potential (removes epitaxial
+        # strain) — skipped when a slab is injected: its geometry (and lattice)
+        # is the caller's, so there is nothing to rebuild.
+        injected = getattr(cfg, "_prebuilt_slab", None) is not None
+        if c.slab.relax_lattice and c.slab.a is None and not injected:
             a0 = equilibrium_lattice(c.slab.element, lambda: make_calculator(c.mlip))
             a_ref = default_lattice(c.slab.element)
             log(f"[{tag}] relaxed lattice a={a0:.4f} A "
