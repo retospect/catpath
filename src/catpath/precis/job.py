@@ -33,6 +33,11 @@ _PARAMS_SCHEMA: dict[str, Any] = {
         "pathway_ref_id": {"type": "integer"},
         # The authoritative config (parsed YAML) to run.
         "config": {"type": "object"},
+        # An externally-prepared slab (the precis `structure` seam) as extxyz;
+        # null → catpath builds an fcc(111) slab from the config label.
+        "slab_extxyz": {"type": ["string", "null"]},
+        # Provenance: the precis structure ref the slab came from (for linking).
+        "structure_ref": {"type": ["integer", "null"]},
         # Backend override; null → run the config's own mlip.backend.
         "force_backend": {"type": ["string", "null"]},
         # Content address (matches the handler's regen cache key).
@@ -54,6 +59,37 @@ DESCRIPTION = (
 )
 
 
+def _summarize(artifact: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a run artifact to the scalar summary a caller ranks on.
+
+    Computes the rate-limiting **barrier** (eV), the energetic **span**, and the
+    **low_confidence** flag from the reaction graph (``analysis.summarize`` — pure
+    graph math, no ML). This is the seam the precis quest harvests: it lifts the
+    barrier onto the candidate structure's meta and ranks the design on it. Empty
+    on any failure — a missing summary must never fail the run/persist.
+    """
+    try:
+        from catpath.precis import analysis
+
+        graph = artifact.get("graph_json") or {}
+        results = artifact.get("results_json") or {}
+        root, target = analysis.roots(graph, results)
+        summ = analysis.summarize(graph, root, target)
+        out: dict[str, Any] = {}
+        ea = (summ.get("rate_limiting") or {}).get("ea")
+        if isinstance(ea, (int, float)) and not isinstance(ea, bool):
+            out["barrier"] = float(ea)
+        span = summ.get("span")
+        if isinstance(span, (int, float)) and not isinstance(span, bool):
+            out["span"] = float(span)
+        if "low_confidence" in summ:
+            out["low_confidence"] = bool(summ["low_confidence"])
+        return out
+    except Exception:  # pragma: no cover - defensive
+        log.warning("catpath_explore: summary failed", exc_info=True)
+        return {}
+
+
 def _dispatch(ctx: Any, spec: Any) -> None:
     """Plugin dispatcher invoked by ``ssh_node`` for a claimed job. Runs the
     catpath pipeline in-process on this node and persists the artifact onto the
@@ -67,30 +103,48 @@ def _dispatch(ctx: Any, spec: Any) -> None:
         ctx.record_failure(f"catpath_explore: malformed params ({exc})")
         return
     force_backend = params.get("force_backend")
+    slab_extxyz = params.get("slab_extxyz")
     backend = force_backend or (config.get("mlip") or {}).get("backend", "?")
+    slab_src = "injected structure" if slab_extxyz else "label-built slab"
     ctx.append_chunk(
         "job_event",
-        f"catpath_explore: {config.get('name', '?')} backend={backend}",
+        f"catpath_explore: {config.get('name', '?')} backend={backend} ({slab_src})",
     )
 
     try:
         from catpath.precis import runner
 
-        artifact = runner.run_pathway(config, force_backend=force_backend)
+        artifact = runner.run_pathway(
+            config, force_backend=force_backend, slab_extxyz=slab_extxyz
+        )
     except Exception as exc:  # pragma: no cover - env/compute dependent
         log.warning("catpath_explore: run failed", exc_info=True)
         ctx.record_failure(f"catpath_explore: run failed: {exc}")
         return
 
+    summary = _summarize(artifact)  # {barrier, span, low_confidence} or {}
+
     try:
         from catpath.precis.persist import persist_result
 
+        pathway_extra: dict[str, Any] = {
+            "produced_by": NAME,
+            "slice": 1,
+            "ran_on": params.get("target_node"),
+        }
+        # Self-describe the pathway with the scalar summary (rate_Ea alias) so a
+        # by-total / by-intermediate view need not recompute it from the graph.
+        if "barrier" in summary:
+            pathway_extra["rate_Ea"] = summary["barrier"]
+        for k in ("span", "low_confidence"):
+            if k in summary:
+                pathway_extra[k] = summary[k]
         persist_result(
             ctx.store,
             pathway_ref_id,
             artifact,
             pathway_slug=params.get("pathway_slug"),
-            extra_meta={"produced_by": NAME, "slice": 1, "ran_on": params.get("target_node")},
+            extra_meta=pathway_extra,
         )
     except Exception as exc:
         log.warning("catpath_explore: persist failed", exc_info=True)
@@ -98,11 +152,20 @@ def _dispatch(ctx: Any, spec: Any) -> None:
         return
 
     r = artifact["results_json"]
-    ctx.set_meta(content_key=artifact["content_key"], n_states=len(r["nodes"]))
+    # Emit the scalar summary + the pathway ref onto the JOB meta — the contract
+    # the precis quest harvest reads (barrier → candidate meta → frontier).
+    ctx.set_meta(
+        content_key=artifact["content_key"],
+        n_states=len(r["nodes"]),
+        pathway_ref=pathway_ref_id,
+        **summary,
+    )
+    b_s = f", barrier {summary['barrier']:g} eV" if "barrier" in summary else ""
     ctx.append_chunk(
         "job_summary",
         f"catpath: {len(r['nodes'])} states, {len(r['edges'])} steps "
-        f"({r['n_samples']} samples, backend {r['backend']}) → pathway #{pathway_ref_id}.",
+        f"({r['n_samples']} samples, backend {r['backend']}) → pathway "
+        f"#{pathway_ref_id}{b_s}.",
     )
     ctx.set_status("succeeded")
 
