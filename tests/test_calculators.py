@@ -60,3 +60,36 @@ def test_uninstalled_backend_gives_actionable_error():
     with pytest.raises(RuntimeError) as e:
         C.make_calculator(MLIPConfig(backend="chgnet"))
     assert "catpath[chgnet]" in str(e.value)
+
+
+def test_ml_calculator_is_memoized(monkeypatch):
+    """An ML backend loads once and is reused for the same (backend, model,
+    device, task) — the load, not the force eval, dominates a run."""
+    calls = {"n": 0}
+    monkeypatch.setattr(C, "_load", lambda backend, cfg: calls.__setitem__("n", calls["n"] + 1) or object())
+    C.reset_calculator_cache()
+    try:
+        cfg = MLIPConfig(backend="mace", model="medium", device="cuda")
+        a = C.make_calculator(cfg)
+        b = C.make_calculator(cfg)
+        assert a is b               # same instance reused
+        assert calls["n"] == 1      # model built exactly once
+
+        # a differing cfg field is a distinct cache entry
+        c = C.make_calculator(MLIPConfig(backend="mace", model="medium", device="cpu"))
+        assert c is not a and calls["n"] == 2
+
+        # cache=False always rebuilds
+        d = C.make_calculator(cfg, cache=False)
+        assert d is not a and calls["n"] == 3
+    finally:
+        C.reset_calculator_cache()
+
+
+def test_emt_calculator_is_never_cached():
+    """EMT is cheap + stateless — always hand back a fresh instance (keeps the
+    light/CI path free of process-global state)."""
+    C.reset_calculator_cache()
+    a = C.make_calculator(MLIPConfig(backend="emt"))
+    b = C.make_calculator(MLIPConfig(backend="emt"))
+    assert a is not b

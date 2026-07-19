@@ -120,9 +120,40 @@ def _load(backend: str, cfg: MLIPConfig):
     raise ValueError(f"unknown MLIP backend: {backend!r}")
 
 
-def make_calculator(cfg: MLIPConfig) -> "Calculator":
-    """Return a fresh ASE calculator for ``cfg`` (``auto`` resolved to a backend)."""
-    return _load(resolve_backend(cfg.backend), cfg)
+# Process-lifetime cache of built ML calculators, keyed on the resolved backend
+# plus the cfg fields that pick a model. An ML potential costs a full torch.load
+# to construct (the MACE model is hundreds of MB, moved onto the GPU), and the
+# pipeline builds a calculator per relaxation and per NEB image — so one run
+# would otherwise do hundreds of identical loads, which dominates wall time and
+# starves the GPU (idle between reloads). An ASE calculator recomputes on every
+# Atoms it scores, so a single cached instance safely serves the whole run. EMT
+# is pure-numpy and cheap, so it's never cached (keeps the light/CI path
+# side-effect-free and hands back a genuinely fresh instance).
+_CALC_CACHE: dict[tuple[str, str | None, str, str | None], "Calculator"] = {}
+
+
+def make_calculator(cfg: MLIPConfig, *, cache: bool = True) -> "Calculator":
+    """Return an ASE calculator for ``cfg`` (``auto`` resolved to a backend).
+
+    ML backends are memoized for the process lifetime and reused for an identical
+    ``(backend, model, device, task)`` — the model loads **once**, not once per
+    relaxation / NEB image (the load, not the force eval, dominates). Pass
+    ``cache=False`` for a guaranteed-fresh instance; EMT is always fresh.
+    """
+    backend = resolve_backend(cfg.backend)
+    if not cache or backend == "emt":
+        return _load(backend, cfg)
+    key = (backend, cfg.model, cfg.device, cfg.task)
+    calc = _CALC_CACHE.get(key)
+    if calc is None:
+        calc = _load(backend, cfg)
+        _CALC_CACHE[key] = calc
+    return calc
+
+
+def reset_calculator_cache() -> None:
+    """Drop cached ML calculators (frees GPU memory; mainly for tests)."""
+    _CALC_CACHE.clear()
 
 
 def check_supported(symbols: set[str], cfg: MLIPConfig) -> None:

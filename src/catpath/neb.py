@@ -38,11 +38,19 @@ def _neb_attempt(
     images = [reactant.copy()]
     images += [reactant.copy() for _ in range(n_images)]
     images += [product.copy()]
+    # One calculator shared across the whole band. A serial NEB evaluates images
+    # sequentially, and an ASE calculator is stateless across the Atoms it scores
+    # (it recomputes on every call), so sharing is correct — and it avoids
+    # rebuilding the ML potential (a full torch.load, hundreds of MB to the GPU)
+    # once per image, which otherwise dominates wall time. `make_calc` may itself
+    # return a process-cached instance (see make_calculator); allow_shared makes
+    # the reuse explicit either way.
+    calc = make_calc()
     for im in images:
-        im.calc = make_calc()  # each image needs its own calculator instance
+        im.calc = calc
 
     neb = NEB(images, climb=climb, method="improvedtangent",
-              allow_shared_calculator=False)
+              allow_shared_calculator=True)
     neb.interpolate(method="idpp")
     dyn = BFGS(neb, logfile=None)
     converged = bool(dyn.run(fmax=fmax, steps=max_steps))
@@ -98,11 +106,12 @@ def linear_barrier(
     if len(reactant) != len(product):
         raise ValueError("endpoints must have identical atom counts")
     p0, p1 = reactant.positions, product.positions
+    calc = make_calc()  # one calculator for every interpolation point (see _neb_attempt)
     es = []
     for t in np.linspace(0.0, 1.0, n_images):
         im = reactant.copy()
         im.positions = (1 - t) * p0 + t * p1
-        im.calc = make_calc()
+        im.calc = calc
         es.append(float(im.get_potential_energy()))
     e_r, e_p, e_ts = es[0], es[-1], max(es)
     return BarrierResult(
