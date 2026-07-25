@@ -14,8 +14,22 @@ from __future__ import annotations
 from typing import Any
 
 from precis.format import toon
+from precis.utils.handle_registry import try_format
 
 from . import analysis
+
+# Drill-down hint appended once a table actually carries a structure handle —
+# see gripe 161576 (structure_refs was written by ingest.py but never surfaced
+# anywhere an agent could read it back out).
+_STRUCTURE_HINT = (
+    "# {col} = precis structure handle for {what} relaxed geometry (slice 1b "
+    "ingest). get(kind='structure', id=<handle>, view='atom') for per-atom "
+    "fields, view='runs' for calc metadata."
+)
+
+
+def _structure_hint(col: str, what: str) -> str:
+    return _STRUCTURE_HINT.format(col=col, what=what)
 
 
 def _e(x: Any) -> str:
@@ -34,26 +48,50 @@ def _roots(meta: dict[str, Any]) -> tuple[str, str]:
     return analysis.roots(meta.get("graph") or {}, meta.get("results", {}))
 
 
+def _structure_handle(refs: dict[str, Any], state: Any) -> str:
+    """``structure_refs`` maps state -> `structure` ref_id (int); render the
+    universal handle (``st<ref_id>``, ADR 0036) an agent can hand straight to
+    ``get(kind='structure', id=...)``. Blank when this state has no ingested
+    structure (older pathway, preview-only run, or a skipped bad geometry)."""
+    ref_id = refs.get(state)
+    if ref_id is None:
+        return ""
+    return try_format("structure", ref_id) or ""
+
+
 # ── single-pathway tables ───────────────────────────────────────────────
 def intermediates_toon(meta: dict[str, Any]) -> str:
     graph = meta.get("graph") or {}
     nm = {n["id"]: n for n in graph.get("nodes", [])}
     order = meta.get("results", {}).get("pathway", list(nm))
+    refs = meta.get("structure_refs") or {}
     rows = [
         {
             "state": s,
             "rel_eV": _e(nm.get(s, {}).get("rel_energy")),
             "std": _b(nm.get(s, {}).get("energy_std")),
             "conf": _conf(nm.get(s, {}).get("low_confidence")),
+            "structure": _structure_handle(refs, s),
         }
         for s in order
         if s in nm
     ]
-    return toon.dump(rows, schema=["state", "rel_eV", "std", "conf"])
+    table = toon.dump(rows, schema=["state", "rel_eV", "std", "conf", "structure"])
+    if any(r["structure"] for r in rows):
+        table += "\n" + _structure_hint("structure", "that state's")
+    return table
 
 
 def steps_toon(meta: dict[str, Any]) -> str:
     graph = meta.get("graph") or {}
+    refs = meta.get("structure_refs") or {}
+
+    def _endpoints(source: Any, target: Any) -> str:
+        a, b = _structure_handle(refs, source), _structure_handle(refs, target)
+        if not a and not b:
+            return ""
+        return f"{a or '?'}→{b or '?'}"
+
     rows = [
         {
             "reaction": f'{e["source"]}→{e["target"]}',
@@ -61,10 +99,16 @@ def steps_toon(meta: dict[str, Any]) -> str:
             "std": _b(e.get("barrier_std")),
             "dE_eV": _e(e.get("delta_e")),
             "conf": _conf(e.get("low_confidence")),
+            "structures": _endpoints(e["source"], e["target"]),
         }
         for e in analysis._reaction_edges(graph)
     ]
-    return toon.dump(rows, schema=["reaction", "Ea_eV", "std", "dE_eV", "conf"])
+    table = toon.dump(
+        rows, schema=["reaction", "Ea_eV", "std", "dE_eV", "conf", "structures"]
+    )
+    if any(r["structures"] for r in rows):
+        table += "\n" + _structure_hint("structures", "each side's (source→target)")
+    return table
 
 
 def warnings_toon(meta: dict[str, Any]) -> str:

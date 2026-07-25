@@ -154,6 +154,49 @@ def test_toon_views_and_aligned_compare() -> None:
     assert "pd" in out and "pt" in out
 
 
+def test_intermediates_and_steps_surface_structure_handles() -> None:
+    # gripe 161576: `structure_refs` ({state -> structure ref_id}, written by
+    # ingest.py) must round-trip into a drill-down handle an agent can hand
+    # straight to get(kind='structure', id=..., view='atom').
+    pytest.importorskip("precis")
+    from catpath.precis import runner, toon_views
+
+    art = runner.run_pathway_from_yaml(BRANCH)
+    states = art["results_json"]["pathway"]
+    assert len(states) >= 2
+
+    meta_with_refs = {
+        "graph": art["graph_json"],
+        "results": art["results_json"],
+        "warnings": art["warnings"],
+        "structure_refs": {states[0]: 101, states[1]: 202},
+    }
+    inter = toon_views.intermediates_toon(meta_with_refs)
+    assert "structure" in inter
+    assert "st101" in inter and "st202" in inter
+    assert "get(kind='structure'" in inter  # the drill-down hint
+
+    steps = toon_views.steps_toon(meta_with_refs)
+    assert "structures" in steps
+    assert "st101" in steps or "st202" in steps
+    assert "get(kind='structure'" in steps
+
+    # no structure_refs at all (older pathway / preview-only run) — never errors,
+    # column present but blank, no drill-down hint dangling with nothing to point at.
+    meta_no_refs = {
+        "graph": art["graph_json"],
+        "results": art["results_json"],
+        "warnings": art["warnings"],
+    }
+    inter_bare = toon_views.intermediates_toon(meta_no_refs)
+    assert "structure" in inter_bare  # column header still present
+    assert "get(kind='structure'" not in inter_bare
+    assert "st101" not in inter_bare and "st202" not in inter_bare
+
+    steps_bare = toon_views.steps_toon(meta_no_refs)
+    assert "get(kind='structure'" not in steps_bare
+
+
 # --- handler: needs precis-mcp + a test DB ------------------------------
 _DSN = os.environ.get("PRECIS_TEST_PG_URL")
 
