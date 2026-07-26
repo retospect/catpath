@@ -23,12 +23,12 @@ from pathlib import Path
 import numpy as np
 from ase.constraints import Hookean
 
+from . import provenance, render
 from .calculators import check_supported, make_calculator, resolve_backend
 from .config import Config
 from .graph import build_graph, to_csv, to_json
-from .network import Network, StateSpec, build_network
-from . import provenance, render
 from .neb import neb_barrier
+from .network import Network, StateSpec, build_network
 from .relax import pre_relax, relax
 from .structures import (
     default_lattice,
@@ -91,49 +91,64 @@ def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
 
 
 # Endpoint binding pre-flight (see `_relax_state_bound`): a one-sided harmonic
-# tether used to try to reseat a desorbed adsorbate before giving up on it.
-BIND_TETHER_K = 5.0  # eV/A^2 -- Hookean spring constant for the reseat tether
-BIND_TETHER_RT = 2.6  # A -- tether rest length; only pulls beyond this distance
-BIND_RESEAT_ATTEMPTS = 1  # reseat attempts (fresh rattle each time) before giving up
+# tether used to try to reseat a desorbed adsorbate before giving up on it. The
+# live values are ``cfg.search.bind_tether_{k,rt}`` / ``bind_reseat_attempts``;
+# these module constants are the fallback defaults (see config.SearchConfig).
+BIND_TETHER_K = 7.5  # eV/A^2 -- Hookean spring constant for the reseat tether
+BIND_TETHER_RT = 2.0  # A -- rest length; must sit inside the real M-adsorbate bond
+BIND_RESEAT_ATTEMPTS = 3  # reseat attempts (fresh rattle each time) before giving up
 
 
 def _detached(geo) -> bool:
-    """True if `geometry_ok` failed because an adsorbate atom desorbed (not just a clash)."""
+    """True if `geometry_ok` failed because an adsorbate fragment desorbed (not just a clash)."""
     return any("detached" in r for r in geo.reasons)
 
 
-def _tether_constraints(atoms, n_slab: int) -> list:
+def _tether_constraints(atoms, n_slab: int, k: float, rt: float) -> list:
     """One Hookean per adsorbate atom, anchored to its nearest slab atom."""
     pos = atoms.get_positions()
     slab_pos = pos[:n_slab]
     cons = []
     for i in range(n_slab, len(atoms)):
         j = int(np.argmin(np.linalg.norm(slab_pos - pos[i], axis=1)))
-        cons.append(Hookean(a1=i, a2=j, k=BIND_TETHER_K, rt=BIND_TETHER_RT))
+        cons.append(Hookean(a1=i, a2=j, k=k, rt=rt))
     return cons
 
 
 def _relax_state_bound(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
     """Like `_relax_state`, but gates on whether the adsorbate actually binds.
 
-    If the plain relax leaves the adsorbate detached from the slab, try a
+    If the plain relax leaves a fragment detached from the slab, try a
     restrained-then-released reseat -- tether each adsorbate atom to its nearest
-    slab atom, relax, drop the tether, relax again unconstrained -- up to
-    ``BIND_RESEAT_ATTEMPTS`` times before concluding it genuinely does not bind.
-    Returns ``(result, geometry_report, bound)``.
+    slab atom (rest length ``bind_tether_rt`` sits INSIDE the real bond, so the
+    tether pulls a desorbing fragment back into the chemisorption well rather than
+    leashing it at arm's length), relax, drop the tether, relax again
+    unconstrained -- up to ``bind_reseat_attempts`` times before concluding it
+    genuinely does not bind. Returns ``(result, geometry_report, bound, diag)``,
+    where ``diag`` is a small dict tracing the plain relax + each reseat attempt
+    (anchor/worst heights) for downstream analysis.
     """
+    k = getattr(cfg.search, "bind_tether_k", BIND_TETHER_K)
+    rt = getattr(cfg.search, "bind_tether_rt", BIND_TETHER_RT)
+    attempts = getattr(cfg.search, "bind_reseat_attempts", BIND_RESEAT_ATTEMPTS)
+
     res, geo = _relax_state(state, slab, n_slab, cfg, seed)
+    diag = {"state": state.name, "rt": rt, "k": k,
+            "plain_anchor": round(geo.anchor_height, 2),
+            "plain_worst": round(geo.adsorbate_height, 2),
+            "attempts": [], "reseated": False}
     if geo.ok:
-        return res, geo, True
+        return res, geo, True, diag
     if not _detached(geo):
         # some other geometry failure (e.g. an adsorbate-adsorbate clash) --
         # not what a binding tether fixes.
-        return res, geo, False
+        return res, geo, False, diag
 
-    for attempt in range(BIND_RESEAT_ATTEMPTS):
+    best_res, best_geo = res, geo
+    for attempt in range(attempts):
         reseat_seed = seed * 1000 + attempt + 1  # different seed each attempt
         start = rattle_adsorbate(state.build(slab), n_slab, seed=reseat_seed, amplitude=0.15)
-        start.set_constraint(list(start.constraints) + _tether_constraints(start, n_slab))
+        start.set_constraint(list(start.constraints) + _tether_constraints(start, n_slab, k, rt))
 
         cleaned = pre_relax(start, make_calculator(cfg.mlip))
         res_teth = relax(cleaned, make_calculator(cfg.mlip),
@@ -145,11 +160,17 @@ def _relax_state_bound(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
         res2 = relax(released, make_calculator(cfg.mlip),
                      fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
         geo2 = geometry_ok(res2.atoms, n_slab)
-        res, geo = res2, geo2  # keep the best (last) attempt as the reported outcome
+        diag["attempts"].append({"anchor": round(geo2.anchor_height, 2),
+                                 "worst": round(geo2.adsorbate_height, 2),
+                                 "ok": bool(geo2.ok)})
         if geo2.ok:
-            return res2, geo2, True
+            diag["reseated"] = True
+            return res2, geo2, True, diag
+        # keep the closest-approach attempt as the reported (still-unbound) outcome
+        if geo2.anchor_height < best_geo.anchor_height:
+            best_res, best_geo = res2, geo2
 
-    return res, geo, False
+    return best_res, best_geo, False, diag
 
 
 def relax_states(cfg: Config, seed: int, log=print) -> dict[str, float]:
@@ -310,13 +331,15 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
     for step in net.steps:
         log(f"[{step.name}] seed={seed}: relaxing endpoints")
         if cfg.search.bind_preflight:
-            r_res, r_geo, r_bound = _relax_state_bound(step.reactant, slab, n_slab, cfg, seed)
-            p_res, p_geo, p_bound = _relax_state_bound(step.product, slab, n_slab, cfg, seed)
+            r_res, r_geo, r_bound, r_diag = _relax_state_bound(step.reactant, slab, n_slab, cfg, seed)
+            p_res, p_geo, p_bound, p_diag = _relax_state_bound(step.product, slab, n_slab, cfg, seed)
         else:  # exact pre-preflight behavior: NEB always runs regardless of geometry
             r_res, r_geo = _relax_state(step.reactant, slab, n_slab, cfg, seed)
             p_res, p_geo = _relax_state(step.product, slab, n_slab, cfg, seed)
             r_bound = p_bound = True
-        for st, res, geo in ((step.reactant, r_res, r_geo), (step.product, p_res, p_geo)):
+            r_diag = p_diag = None
+        for st, res, geo, diag in ((step.reactant, r_res, r_geo, r_diag),
+                                   (step.product, p_res, p_geo, p_diag)):
             # keep the lowest energy seen for a state within this seed
             states[st.name] = min(states.get(st.name, np.inf), res.energy)
             if collect is not None:
@@ -325,6 +348,16 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
                     collect[st.name] = (res.energy, res.atoms.copy())
             if not geo.ok:
                 warnings.append(f"{st.name} seed={seed} geometry: {'; '.join(geo.reasons)}")
+            elif diag is not None and diag.get("reseated"):
+                # INFO diagnostic: the reseat rescued a plain-relax desorption.
+                # MUST avoid the trust-gate substrings ("detached" / "NEB not
+                # converged") so a rescued (now-bound) endpoint stays trusted.
+                last = diag["attempts"][-1]
+                warnings.append(
+                    f"{st.name} seed={seed} RESEATED ok: plain closest "
+                    f"{diag['plain_anchor']}A -> bound closest {last['anchor']}A "
+                    f"(tether rt={diag['rt']} k={diag['k']}, "
+                    f"{len(diag['attempts'])} attempt(s))")
             if not res.converged:
                 warnings.append(f"{st.name} seed={seed} not converged")
 
@@ -335,13 +368,22 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
             # endpoint binding pre-flight failed -- an honest "no barrier" beats a
             # climbing-image NEB anchored on a desorbed endpoint (garbage geometry
             # in, garbage barrier out).
-            for st, geo, bound in ((step.reactant, r_geo, r_bound),
-                                   (step.product, p_geo, p_bound)):
+            for st, geo, bound, diag in ((step.reactant, r_geo, r_bound, r_diag),
+                                         (step.product, p_geo, p_bound, p_diag)):
                 if not bound:
+                    trace = ""
+                    if diag is not None:
+                        tries = "; ".join(
+                            f"a{i + 1} closest {a['anchor']}A worst {a['worst']}A"
+                            for i, a in enumerate(diag["attempts"])) or "no reseat run"
+                        trace = (f" [preflight rt={diag['rt']} k={diag['k']}: plain closest "
+                                 f"{diag['plain_anchor']}A worst {diag['plain_worst']}A; "
+                                 f"reseat {tries}]")
                     warnings.append(
                         f"{st.name} seed={seed} INFEASIBLE: adsorbate does not bind — "
-                        f"detached, desorbs to {geo.adsorbate_height:.1f} A after "
-                        f"restrained relax; try a different site or dopant")
+                        f"detached, desorbs to {geo.adsorbate_height:.1f} A (closest "
+                        f"{geo.anchor_height:.1f} A) after restrained relax; try a "
+                        f"different site or dopant{trace}")
             log(f"[{step.name}] seed={seed}: NEB skipped (endpoint does not bind)")
             steps[step.name] = entry
             continue

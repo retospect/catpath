@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field, asdict
+import re
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-
-import re
 
 import yaml
 
@@ -92,6 +91,16 @@ class SearchConfig:
     # a desorbed endpoint gets a restrained-then-released reseat attempt before the
     # (expensive) NEB is allowed to run at all. False reproduces pre-preflight behavior.
     bind_preflight: bool = True
+    # reseat tether controls (pipeline._relax_state_bound). ``rt`` is the Hookean
+    # rest length: the tether only pulls once the adsorbate is farther than this
+    # from its nearest slab atom, so it must sit INSIDE the real chemisorption bond
+    # range (~1.9-2.1 A for N*/O* on a late transition metal) to pull a desorbing
+    # fragment back INTO the well — a longer rt (>2.5) merely leashes runaway
+    # desorption at arm's length and releases to re-desorb. More attempts = more
+    # fresh poses tried before an endpoint is declared genuinely non-binding.
+    bind_tether_k: float = 7.5      # eV/A^2 Hookean spring constant
+    bind_tether_rt: float = 2.0     # A rest length (real M-adsorbate bond range)
+    bind_reseat_attempts: int = 3   # reseat tries (fresh pose each) before giving up
     # similarity / acceptance thresholds
     rmsd_thresh: float = 0.7  # A
     energy_thresh: float = 0.05  # eV (~1 kcal/mol) for "same" energy
@@ -154,7 +163,7 @@ class Config:
         if not self.substrates:
             self.substrates = [self.substrate]
 
-    def substrate_runs(self) -> list["SubstrateSpec"]:
+    def substrate_runs(self) -> list[SubstrateSpec]:
         """Normalise ``substrates`` into explicit (substrate, target, network) specs.
 
         A bare-string entry inherits this config's target/network/reagents; a dict
@@ -176,11 +185,11 @@ class Config:
         return specs
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "Config":
+    def from_yaml(cls, path: str | Path) -> Config:
         return cls.from_dict(_load_yaml(Path(path).read_text()))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Config":
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         data = copy.deepcopy(data)
         slab = SlabConfig(**data.pop("slab", {}))
         mlip = MLIPConfig(**data.pop("mlip", {}))
