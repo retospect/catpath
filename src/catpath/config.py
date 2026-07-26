@@ -88,6 +88,10 @@ class SearchConfig:
     neb_max_steps: int = 80
     neb_retries: int = 1  # on non-convergence, retry with a denser band + more steps
     seeds: list[int] = field(default_factory=lambda: [0, 1, 2])
+    # gate the NEB on an endpoint binding pre-flight (see pipeline._relax_state_bound):
+    # a desorbed endpoint gets a restrained-then-released reseat attempt before the
+    # (expensive) NEB is allowed to run at all. False reproduces pre-preflight behavior.
+    bind_preflight: bool = True
     # similarity / acceptance thresholds
     rmsd_thresh: float = 0.7  # A
     energy_thresh: float = 0.05  # eV (~1 kcal/mol) for "same" energy

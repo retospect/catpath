@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from ase.constraints import Hookean
 
 from .calculators import check_supported, make_calculator, resolve_backend
 from .config import Config
@@ -87,6 +88,68 @@ def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
                 fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
     geo = geometry_ok(res.atoms, n_slab)
     return res, geo
+
+
+# Endpoint binding pre-flight (see `_relax_state_bound`): a one-sided harmonic
+# tether used to try to reseat a desorbed adsorbate before giving up on it.
+BIND_TETHER_K = 5.0  # eV/A^2 -- Hookean spring constant for the reseat tether
+BIND_TETHER_RT = 2.6  # A -- tether rest length; only pulls beyond this distance
+BIND_RESEAT_ATTEMPTS = 1  # reseat attempts (fresh rattle each time) before giving up
+
+
+def _detached(geo) -> bool:
+    """True if `geometry_ok` failed because an adsorbate atom desorbed (not just a clash)."""
+    return any("detached" in r for r in geo.reasons)
+
+
+def _tether_constraints(atoms, n_slab: int) -> list:
+    """One Hookean per adsorbate atom, anchored to its nearest slab atom."""
+    pos = atoms.get_positions()
+    slab_pos = pos[:n_slab]
+    cons = []
+    for i in range(n_slab, len(atoms)):
+        j = int(np.argmin(np.linalg.norm(slab_pos - pos[i], axis=1)))
+        cons.append(Hookean(a1=i, a2=j, k=BIND_TETHER_K, rt=BIND_TETHER_RT))
+    return cons
+
+
+def _relax_state_bound(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
+    """Like `_relax_state`, but gates on whether the adsorbate actually binds.
+
+    If the plain relax leaves the adsorbate detached from the slab, try a
+    restrained-then-released reseat -- tether each adsorbate atom to its nearest
+    slab atom, relax, drop the tether, relax again unconstrained -- up to
+    ``BIND_RESEAT_ATTEMPTS`` times before concluding it genuinely does not bind.
+    Returns ``(result, geometry_report, bound)``.
+    """
+    res, geo = _relax_state(state, slab, n_slab, cfg, seed)
+    if geo.ok:
+        return res, geo, True
+    if not _detached(geo):
+        # some other geometry failure (e.g. an adsorbate-adsorbate clash) --
+        # not what a binding tether fixes.
+        return res, geo, False
+
+    for attempt in range(BIND_RESEAT_ATTEMPTS):
+        reseat_seed = seed * 1000 + attempt + 1  # different seed each attempt
+        start = rattle_adsorbate(state.build(slab), n_slab, seed=reseat_seed, amplitude=0.15)
+        start.set_constraint(list(start.constraints) + _tether_constraints(start, n_slab))
+
+        cleaned = pre_relax(start, make_calculator(cfg.mlip))
+        res_teth = relax(cleaned, make_calculator(cfg.mlip),
+                         fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
+
+        released = res_teth.atoms
+        released.set_constraint([c for c in released.constraints
+                                 if not isinstance(c, Hookean)])
+        res2 = relax(released, make_calculator(cfg.mlip),
+                     fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
+        geo2 = geometry_ok(res2.atoms, n_slab)
+        res, geo = res2, geo2  # keep the best (last) attempt as the reported outcome
+        if geo2.ok:
+            return res2, geo2, True
+
+    return res, geo, False
 
 
 def relax_states(cfg: Config, seed: int, log=print) -> dict[str, float]:
@@ -246,8 +309,13 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
 
     for step in net.steps:
         log(f"[{step.name}] seed={seed}: relaxing endpoints")
-        r_res, r_geo = _relax_state(step.reactant, slab, n_slab, cfg, seed)
-        p_res, p_geo = _relax_state(step.product, slab, n_slab, cfg, seed)
+        if cfg.search.bind_preflight:
+            r_res, r_geo, r_bound = _relax_state_bound(step.reactant, slab, n_slab, cfg, seed)
+            p_res, p_geo, p_bound = _relax_state_bound(step.product, slab, n_slab, cfg, seed)
+        else:  # exact pre-preflight behavior: NEB always runs regardless of geometry
+            r_res, r_geo = _relax_state(step.reactant, slab, n_slab, cfg, seed)
+            p_res, p_geo = _relax_state(step.product, slab, n_slab, cfg, seed)
+            r_bound = p_bound = True
         for st, res, geo in ((step.reactant, r_res, r_geo), (step.product, p_res, p_geo)):
             # keep the lowest energy seen for a state within this seed
             states[st.name] = min(states.get(st.name, np.inf), res.energy)
@@ -263,6 +331,20 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
         log(f"[{step.name}] seed={seed}: NEB")
         entry = {"reactant": step.reactant.name, "product": step.product.name,
                  "barrier": None, "delta_e": None}
+        if not (r_bound and p_bound):
+            # endpoint binding pre-flight failed -- an honest "no barrier" beats a
+            # climbing-image NEB anchored on a desorbed endpoint (garbage geometry
+            # in, garbage barrier out).
+            for st, geo, bound in ((step.reactant, r_geo, r_bound),
+                                   (step.product, p_geo, p_bound)):
+                if not bound:
+                    warnings.append(
+                        f"{st.name} seed={seed} INFEASIBLE: adsorbate does not bind — "
+                        f"detached, desorbs to {geo.adsorbate_height:.1f} A after "
+                        f"restrained relax; try a different site or dopant")
+            log(f"[{step.name}] seed={seed}: NEB skipped (endpoint does not bind)")
+            steps[step.name] = entry
+            continue
         try:
             bar = neb_barrier(
                 r_res.atoms, p_res.atoms,
