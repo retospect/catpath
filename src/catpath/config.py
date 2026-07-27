@@ -101,6 +101,22 @@ class SearchConfig:
     bind_tether_k: float = 7.5      # eV/A^2 Hookean spring constant
     bind_tether_rt: float = 2.0     # A rest length (real M-adsorbate bond range)
     bind_reseat_attempts: int = 3   # reseat tries (fresh pose each) before giving up
+    # DISSOLVING tether: rather than yank the adsorbate in at full ``k`` and drop
+    # the spring in one step (which kicks it straight back off — "leash and
+    # re-desorb"), relax through a decreasing schedule of spring constants so the
+    # fragment settles into the chemisorption well ADIABATICALLY. Each entry is a
+    # fraction of ``bind_tether_k``; the final 0.0 is the unconstrained relax that
+    # the endpoint must survive to count as bound. The per-stage energies also
+    # trace the adsorption-barrier profile (see ``_relax_state_bound``).
+    bind_tether_ramp: list[float] = field(
+        default_factory=lambda: [1.0, 0.5, 0.25, 0.1, 0.0])
+    # ADSORPTION barrier: the max energy the fragment must climb as the tether
+    # pulls it from its desorbed position into the well (0 if the pull-in is
+    # monotonically downhill = barrierless, a spurious desorption legitimately
+    # rescued). A reseat that only binds by crossing MORE than this is genuine
+    # activated adsorption — the endpoint is reported non-binding (untrusted,
+    # excluded from ranking) rather than fed a barrier the site can't really reach.
+    bind_ads_barrier_max: float = 0.75  # eV
     # similarity / acceptance thresholds
     rmsd_thresh: float = 0.7  # A
     energy_thresh: float = 0.05  # eV (~1 kcal/mol) for "same" energy

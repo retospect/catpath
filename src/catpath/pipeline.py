@@ -37,7 +37,7 @@ from .structures import (
     symbols_of,
 )
 from .uncertainty import Estimate, aggregate
-from .validate import geometry_ok
+from .validate import binding_site_ok, geometry_ok
 from .viz import draw_graph, draw_profile, energy_map
 
 
@@ -77,6 +77,7 @@ class Results:
     structures: dict = field(default_factory=dict)  # state -> relaxed Atoms (not serialised)
     lattice: dict = field(default_factory=dict)  # model tag -> relaxed lattice constant (A)
     warnings: list[str] = field(default_factory=list)
+    ads_barriers: dict[str, float] = field(default_factory=dict)  # state -> adsorption barrier (eV)
 
 
 def _relax_state(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
@@ -104,6 +105,18 @@ def _detached(geo) -> bool:
     return any("detached" in r for r in geo.reasons)
 
 
+def _binding_site(state: StateSpec, res, geo, n_slab: int) -> tuple[bool, list[str]]:
+    """Verify a BOUND endpoint binds through its ``*``-designated atom.
+
+    Skipped (returns ok) when the endpoint is already detached (that failure is
+    reported separately) — the check only distinguishes a bound-but-flipped
+    geometry from a correctly-seated one. Returns ``(ok, reasons)`` where reasons
+    carry the ``wrong-site`` trust-gate substring."""
+    if not geo.ok:
+        return True, []
+    return binding_site_ok(res.atoms, n_slab, state.placement_heights())
+
+
 def _tether_constraints(atoms, n_slab: int, k: float, rt: float) -> list:
     """One Hookean per adsorbate atom, anchored to its nearest slab atom."""
     pos = atoms.get_positions()
@@ -115,28 +128,91 @@ def _tether_constraints(atoms, n_slab: int, k: float, rt: float) -> list:
     return cons
 
 
+# Default dissolving-tether ramp (fractions of ``k``) when the config predates
+# ``bind_tether_ramp``. Ends at 0.0 — the unconstrained relax the endpoint must
+# survive to count as bound.
+BIND_TETHER_RAMP = [1.0, 0.5, 0.25, 0.1, 0.0]
+BIND_ADS_BARRIER_MAX = 0.75  # eV -- above this, a reseat is activated adsorption
+
+
+def _dissolve_reseat(start, n_slab, cfg, k, rt, ramp):
+    """Relax through a DISSOLVING tether: full-k pull-in, then k scaled down the
+    ``ramp`` to 0, so the fragment settles into the well adiabatically instead of
+    springing back off when the spring is dropped in one step.
+
+    Returns ``(final_result, geometry_report)`` — the final entry of ``ramp`` is
+    0.0, so the reported geometry is from a fully UNCONSTRAINED relax (no residual
+    spring holding a non-binding fragment in place).
+    """
+    res = None
+    atoms = start
+    base = [c for c in start.constraints if not isinstance(c, Hookean)]
+    for frac in ramp:
+        atoms = atoms.copy()
+        cons = list(base)
+        if frac > 0.0:
+            cons += _tether_constraints(atoms, n_slab, k * frac, rt)
+        atoms.set_constraint(cons)
+        res = relax(atoms, make_calculator(cfg.mlip),
+                    fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
+        atoms = res.atoms
+    geo = geometry_ok(res.atoms, n_slab)
+    return res, geo
+
+
+def _adsorption_barrier(desorbed, bound, cfg, n_images: int = 5) -> float:
+    """The adsorption barrier along the desorbed -> bound coordinate: the PES
+    energy the fragment must climb ABOVE its desorbed asymptote to reach the well
+    (0 if the approach is monotonically downhill = barrierless chemisorption).
+
+    Measured with a short, loose climbing-image NEB (IDPP-interpolated) between
+    the (untethered) desorbed geometry and the reseated bound geometry. A RELAXED
+    band is essential here: a straight-line interpolation clips a laterally-offset
+    fragment through a surface atom and reports a large spurious hump; the NEB lets
+    each image find its minimum-energy lateral position, so the barrier reflects
+    the true minimum-energy approach. No Hookean penalty enters the reported PES
+    (the tether only shaped the reseat; the barrier is measured spring-free).
+    Only runs on the desorb-then-reseat branch (already the expensive path), so it
+    does not add cost to endpoints that bind on the first relax.
+    """
+    if len(desorbed) != len(bound):
+        return 0.0
+    bar = neb_barrier(desorbed, bound,
+                      make_calc=lambda: make_calculator(cfg.mlip),
+                      n_images=n_images, fmax=0.2, max_steps=40, retries=0)
+    return max(0.0, bar.barrier)
+
+
 def _relax_state_bound(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
     """Like `_relax_state`, but gates on whether the adsorbate actually binds.
 
     If the plain relax leaves a fragment detached from the slab, try a
-    restrained-then-released reseat -- tether each adsorbate atom to its nearest
-    slab atom (rest length ``bind_tether_rt`` sits INSIDE the real bond, so the
-    tether pulls a desorbing fragment back into the chemisorption well rather than
-    leashing it at arm's length), relax, drop the tether, relax again
-    unconstrained -- up to ``bind_reseat_attempts`` times before concluding it
-    genuinely does not bind. Returns ``(result, geometry_report, bound, diag)``,
-    where ``diag`` is a small dict tracing the plain relax + each reseat attempt
-    (anchor/worst heights) for downstream analysis.
+    DISSOLVING-tether reseat -- tether each adsorbate atom to its nearest slab
+    atom (rest length ``bind_tether_rt`` sits INSIDE the real bond, so the tether
+    pulls a desorbing fragment back into the chemisorption well rather than
+    leashing it at arm's length), then relax through a decreasing schedule of
+    spring constants (``bind_tether_ramp``) down to an unconstrained relax, so the
+    fragment settles adiabatically instead of re-desorbing on an abrupt release --
+    up to ``bind_reseat_attempts`` times (fresh pose each) before concluding it
+    genuinely does not bind. The per-stage pull-in energies give an ADSORPTION
+    BARRIER; a reseat that only binds by crossing more than ``bind_ads_barrier_max``
+    is activated adsorption and is reported non-binding (untrusted).
+
+    Returns ``(result, geometry_report, bound, diag)``, where ``diag`` traces the
+    plain relax + each reseat attempt (anchor/worst heights, adsorption barrier)
+    for downstream analysis.
     """
     k = getattr(cfg.search, "bind_tether_k", BIND_TETHER_K)
     rt = getattr(cfg.search, "bind_tether_rt", BIND_TETHER_RT)
     attempts = getattr(cfg.search, "bind_reseat_attempts", BIND_RESEAT_ATTEMPTS)
+    ramp = getattr(cfg.search, "bind_tether_ramp", None) or BIND_TETHER_RAMP
+    ads_max = getattr(cfg.search, "bind_ads_barrier_max", BIND_ADS_BARRIER_MAX)
 
     res, geo = _relax_state(state, slab, n_slab, cfg, seed)
     diag = {"state": state.name, "rt": rt, "k": k,
             "plain_anchor": round(geo.anchor_height, 2),
             "plain_worst": round(geo.adsorbate_height, 2),
-            "attempts": [], "reseated": False}
+            "attempts": [], "reseated": False, "ads_barrier": None}
     if geo.ok:
         return res, geo, True, diag
     if not _detached(geo):
@@ -144,28 +220,30 @@ def _relax_state_bound(state: StateSpec, slab, n_slab, cfg: Config, seed: int):
         # not what a binding tether fixes.
         return res, geo, False, diag
 
+    desorbed_atoms = res.atoms  # the untethered detached geometry = adsorption ref
     best_res, best_geo = res, geo
     for attempt in range(attempts):
         reseat_seed = seed * 1000 + attempt + 1  # different seed each attempt
         start = rattle_adsorbate(state.build(slab), n_slab, seed=reseat_seed, amplitude=0.15)
-        start.set_constraint(list(start.constraints) + _tether_constraints(start, n_slab, k, rt))
-
         cleaned = pre_relax(start, make_calculator(cfg.mlip))
-        res_teth = relax(cleaned, make_calculator(cfg.mlip),
-                         fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
 
-        released = res_teth.atoms
-        released.set_constraint([c for c in released.constraints
-                                 if not isinstance(c, Hookean)])
-        res2 = relax(released, make_calculator(cfg.mlip),
-                     fmax=cfg.search.fmax, max_steps=cfg.search.max_steps)
-        geo2 = geometry_ok(res2.atoms, n_slab)
+        res2, geo2 = _dissolve_reseat(cleaned, n_slab, cfg, k, rt, ramp)
+        ads_barrier = _adsorption_barrier(desorbed_atoms, res2.atoms, cfg) if geo2.ok else 0.0
+        # activated adsorption: bound only by climbing a real barrier -> the site
+        # does not spontaneously bind this fragment. Treat as still-detached.
+        activated = geo2.ok and ads_barrier > ads_max
         diag["attempts"].append({"anchor": round(geo2.anchor_height, 2),
                                  "worst": round(geo2.adsorbate_height, 2),
-                                 "ok": bool(geo2.ok)})
-        if geo2.ok:
+                                 "ok": bool(geo2.ok and not activated),
+                                 "ads_barrier": round(ads_barrier, 3)})
+        if geo2.ok and not activated:
             diag["reseated"] = True
+            diag["ads_barrier"] = round(ads_barrier, 3)
             return res2, geo2, True, diag
+        if activated:
+            # record the barrier that made it untrusted (max over attempts seen)
+            prev = diag["ads_barrier"] or 0.0
+            diag["ads_barrier"] = round(max(prev, ads_barrier), 3)
         # keep the closest-approach attempt as the reported (still-unbound) outcome
         if geo2.anchor_height < best_geo.anchor_height:
             best_res, best_geo = res2, geo2
@@ -327,6 +405,7 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
     states: dict[str, float] = {}
     steps: dict[str, dict] = {}
     warnings: list[str] = []
+    ads_barriers: dict[str, float] = {}  # per-state adsorption barrier (reseat pull-in)
 
     for step in net.steps:
         log(f"[{step.name}] seed={seed}: relaxing endpoints")
@@ -338,53 +417,84 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
             p_res, p_geo = _relax_state(step.product, slab, n_slab, cfg, seed)
             r_bound = p_bound = True
             r_diag = p_diag = None
-        for st, res, geo, diag in ((step.reactant, r_res, r_geo, r_diag),
-                                   (step.product, p_res, p_geo, p_diag)):
+        # bond-site (*) identity: only meaningful on a bound endpoint (a detached
+        # one is already untrusted) and only when we have the StateSpec placement.
+        r_site_ok, r_site_reasons = _binding_site(step.reactant, r_res, r_geo, n_slab)
+        p_site_ok, p_site_reasons = _binding_site(step.product, p_res, p_geo, n_slab)
+        for st, res, geo, diag, site_reasons in (
+                (step.reactant, r_res, r_geo, r_diag, r_site_reasons),
+                (step.product, p_res, p_geo, p_diag, p_site_reasons)):
             # keep the lowest energy seen for a state within this seed
             states[st.name] = min(states.get(st.name, np.inf), res.energy)
             if collect is not None:
                 prev = collect.get(st.name)
                 if prev is None or res.energy < prev[0]:
                     collect[st.name] = (res.energy, res.atoms.copy())
+            if diag is not None and diag.get("ads_barrier") is not None:
+                # record the adsorption barrier the dissolving tether traversed
+                # (max over states if a name recurs across steps)
+                ab = float(diag["ads_barrier"])
+                ads_barriers[st.name] = max(ads_barriers.get(st.name, 0.0), ab)
             if not geo.ok:
                 warnings.append(f"{st.name} seed={seed} geometry: {'; '.join(geo.reasons)}")
+            elif site_reasons:
+                # bound, but through the wrong atom — the * designates a different
+                # binder. Keep the "wrong-site" trust-gate substring.
+                warnings.append(
+                    f"{st.name} seed={seed} {'; '.join(site_reasons)}")
             elif diag is not None and diag.get("reseated"):
                 # INFO diagnostic: the reseat rescued a plain-relax desorption.
                 # MUST avoid the trust-gate substrings ("detached" / "NEB not
-                # converged") so a rescued (now-bound) endpoint stays trusted.
+                # converged" / "wrong-site") so a rescued (now-bound) endpoint
+                # stays trusted.
                 last = diag["attempts"][-1]
+                ab = diag.get("ads_barrier")
+                ab_txt = f", adsorption barrier {ab} eV" if ab is not None else ""
                 warnings.append(
                     f"{st.name} seed={seed} RESEATED ok: plain closest "
                     f"{diag['plain_anchor']}A -> bound closest {last['anchor']}A "
                     f"(tether rt={diag['rt']} k={diag['k']}, "
-                    f"{len(diag['attempts'])} attempt(s))")
+                    f"{len(diag['attempts'])} attempt(s){ab_txt})")
             if not res.converged:
                 warnings.append(f"{st.name} seed={seed} not converged")
 
         log(f"[{step.name}] seed={seed}: NEB")
         entry = {"reactant": step.reactant.name, "product": step.product.name,
                  "barrier": None, "delta_e": None}
-        if not (r_bound and p_bound):
+        if not (r_bound and p_bound and r_site_ok and p_site_ok):
             # endpoint binding pre-flight failed -- an honest "no barrier" beats a
-            # climbing-image NEB anchored on a desorbed endpoint (garbage geometry
-            # in, garbage barrier out).
+            # climbing-image NEB anchored on a desorbed OR mis-bound endpoint
+            # (garbage geometry in, garbage barrier out). Wrong-site endpoints were
+            # already warned above; here we just skip the NEB for them too.
             for st, geo, bound, diag in ((step.reactant, r_geo, r_bound, r_diag),
                                          (step.product, p_geo, p_bound, p_diag)):
                 if not bound:
                     trace = ""
+                    activated = diag is not None and diag.get("ads_barrier") is not None
                     if diag is not None:
                         tries = "; ".join(
                             f"a{i + 1} closest {a['anchor']}A worst {a['worst']}A"
+                            f" ads_barrier {a['ads_barrier']}eV"
                             for i, a in enumerate(diag["attempts"])) or "no reseat run"
                         trace = (f" [preflight rt={diag['rt']} k={diag['k']}: plain closest "
                                  f"{diag['plain_anchor']}A worst {diag['plain_worst']}A; "
                                  f"reseat {tries}]")
-                    warnings.append(
-                        f"{st.name} seed={seed} INFEASIBLE: adsorbate does not bind — "
-                        f"detached, desorbs to {geo.adsorbate_height:.1f} A (closest "
-                        f"{geo.anchor_height:.1f} A) after restrained relax; try a "
-                        f"different site or dopant{trace}")
-            log(f"[{step.name}] seed={seed}: NEB skipped (endpoint does not bind)")
+                    if activated:
+                        # bound only by crossing a real adsorption barrier -> genuine
+                        # activated adsorption, not spontaneous chemisorption. Keep the
+                        # trust-gate substring "detached" so the barrier stays untrusted.
+                        warnings.append(
+                            f"{st.name} seed={seed} INFEASIBLE: activated adsorption — "
+                            f"reseats only by climbing {diag['ads_barrier']} eV "
+                            f"(> bind_ads_barrier_max); treated as detached / "
+                            f"non-binding{trace}")
+                    else:
+                        warnings.append(
+                            f"{st.name} seed={seed} INFEASIBLE: adsorbate does not bind — "
+                            f"detached, desorbs to {geo.adsorbate_height:.1f} A (closest "
+                            f"{geo.anchor_height:.1f} A) after restrained relax; try a "
+                            f"different site or dopant{trace}")
+            log(f"[{step.name}] seed={seed}: NEB skipped (endpoint unbound or mis-bound)")
             steps[step.name] = entry
             continue
         try:
@@ -394,16 +504,29 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
                 n_images=cfg.search.neb_images,
                 fmax=cfg.search.neb_fmax, max_steps=cfg.search.neb_max_steps,
                 retries=cfg.search.neb_retries,
+                n_slab=n_slab,
+                tether={"k": getattr(cfg.search, "bind_tether_k", BIND_TETHER_K),
+                        "rt": getattr(cfg.search, "bind_tether_rt", BIND_TETHER_RT),
+                        "ramp": getattr(cfg.search, "bind_tether_ramp", None)
+                        or BIND_TETHER_RAMP},
             )
             entry["barrier"] = bar.barrier
             entry["delta_e"] = bar.delta_e
             if not bar.converged:
                 warnings.append(f"{step.name} seed={seed} NEB not converged")
+            if bar.desorbed_images:
+                # a mid-band image floated off the slab -> the reported TS is not
+                # on a surface path. Keep the "detached" trust-gate substring.
+                warnings.append(
+                    f"{step.name} seed={seed} NEB mid-band desorption: "
+                    f"{bar.desorbed_images} interior image(s) detached from slab "
+                    f"— barrier off a non-surface path")
         except Exception as e:  # abandon this seed's edge, keep going
             warnings.append(f"{step.name} seed={seed} NEB failed: {e}")
         steps[step.name] = entry
 
-    return {"seed": seed, "states": states, "steps": steps, "warnings": warnings}
+    return {"seed": seed, "states": states, "steps": steps, "warnings": warnings,
+            "ads_barriers": ads_barriers}
 
 
 def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
@@ -431,6 +554,10 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
         ref = p["states"].get(ref_state)  # per-partial reference removes offset
         for name, e in p["states"].items():
             state_vals.setdefault(name, []).append(e - ref if ref is not None else e)
+        # adsorption barrier is a property of the reseat, not a stochastic energy:
+        # keep the worst (max) seen across seeds/models as the conservative report.
+        for name, ab in p.get("ads_barriers", {}).items():
+            results.ads_barriers[name] = max(results.ads_barriers.get(name, 0.0), float(ab))
         for sname, s in p["steps"].items():
             step_meta[sname] = (s["reactant"], s["product"])
             if s["barrier"] is not None:  # barriers are already relative
@@ -537,6 +664,14 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
                   for name, atoms in results.structures.items()}
         render.gallery(results.structures, results.node_energies,
                        outdir / "gallery.png", n_slab, **rk)
+        # per-state pics dumped individually (top+side, same fixed camera/window as
+        # the gallery) so each adsorbed state is inspectable on its own.
+        import matplotlib.image as _mpimg
+        states_dir = outdir / "states"
+        states_dir.mkdir(exist_ok=True)
+        for name, arr in thumbs.items():
+            safe = name.replace("/", "_").replace(" ", "_")
+            _mpimg.imsave(states_dir / f"{safe}.png", np.asarray(arr))
         draw_profile(g, outdir / "graph_thumbs.png", title=title, caption=cap,
                      show_caption=True, png_meta=pmeta, thumbs=thumbs)
         draw_graph(g, outdir / "graph_network_thumbs.png", title=title, thumbs=thumbs)

@@ -132,6 +132,47 @@ def geometry_ok(
     )
 
 
+def binding_site_ok(
+    atoms: Atoms,
+    n_slab: int,
+    placement_heights: list[float],
+    bond_cutoff: float = 1.8,
+) -> tuple[bool, list[str]]:
+    """Check that each fragment binds the surface through the ``*``-designated atom.
+
+    ``placement_heights[i]`` is the intended height of adsorbate atom ``n_slab+i``
+    (from its :class:`~catpath.network.StateSpec` spec); the LOWEST-placed atom in
+    a fragment is the one the formula's ``*`` seats at the site. After relaxation
+    the atom actually closest to the slab in each fragment must be the SAME ELEMENT
+    as that intended anchor — comparing by element (not index) so a swap between
+    two equivalent atoms (e.g. the two O's of NO2*) is fine, while a genuine flip
+    (NO* rolling onto its O instead of N) is flagged.
+
+    Returns ``(ok, reasons)``; each reason carries the literal ``wrong-site`` so
+    the precis trust-gate counts it (a barrier off a mis-bound endpoint is as
+    untrustworthy as one off a desorbed one).
+    """
+    ads = list(range(n_slab, len(atoms)))
+    if not ads or len(placement_heights) != len(ads):
+        return True, []  # nothing to check / caller gave no intent
+    pos = atoms.get_positions()
+    slab_pos = pos[:n_slab]
+    atom_h = {a: float(np.linalg.norm(slab_pos - pos[a], axis=1).min()) for a in ads}
+    height_of = {a: placement_heights[a - n_slab] for a in ads}
+
+    reasons: list[str] = []
+    for frag in _fragments(pos, ads, bond_cutoff):
+        intended = min(frag, key=lambda a: height_of[a])   # lowest-placed = the *
+        actual = min(frag, key=lambda a: atom_h[a])         # relaxed nearest-slab
+        want, got = atoms[intended].symbol, atoms[actual].symbol
+        if want != got:
+            syms = "".join(atoms[a].symbol for a in frag)
+            reasons.append(
+                f"fragment {syms} (atoms {min(frag)}-{max(frag)}) binds through "
+                f"{got} but the * designates {want} — wrong-site")
+    return (not reasons), reasons
+
+
 # --- Similarity layer --------------------------------------------------------
 
 def rmsd(a: Atoms, b: Atoms, n_slab: int) -> float:

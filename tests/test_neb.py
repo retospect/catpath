@@ -14,10 +14,11 @@ from catpath.structures import build_slab, place_fragments
 def test_retry_escalates_until_converged(monkeypatch):
     calls = []
 
-    def fake_attempt(reactant, product, make_calc, n_images, fmax, max_steps, climb):
+    def fake_attempt(reactant, product, make_calc, n_images, fmax, max_steps,
+                     climb, tether=None, n_slab=None):
         calls.append((n_images, max_steps))
         converged = len(calls) == 3          # only the 3rd attempt "converges"
-        return [0.0, 0.5, 0.2], converged
+        return [0.0, 0.5, 0.2], converged, []
 
     monkeypatch.setattr(neb, "_neb_attempt", fake_attempt)
     r = build_slab(SlabConfig(size=(2, 2, 3), vacuum=8.0))
@@ -32,7 +33,7 @@ def test_retry_escalates_until_converged(monkeypatch):
 
 def test_no_retry_when_first_attempt_converges(monkeypatch):
     def fake_attempt(*a, **k):
-        return [0.0, 0.3, 0.1], True
+        return [0.0, 0.3, 0.1], True, []
 
     monkeypatch.setattr(neb, "_neb_attempt", fake_attempt)
     r = build_slab(SlabConfig(size=(2, 2, 3), vacuum=8.0))
@@ -43,9 +44,10 @@ def test_no_retry_when_first_attempt_converges(monkeypatch):
 def test_returns_last_attempt_when_never_converges(monkeypatch):
     seen = []
 
-    def fake_attempt(reactant, product, make_calc, n_images, fmax, max_steps, climb):
+    def fake_attempt(reactant, product, make_calc, n_images, fmax, max_steps,
+                     climb, tether=None, n_slab=None):
         seen.append(n_images)
-        return [0.0, 0.9, 0.4], False
+        return [0.0, 0.9, 0.4], False, []
 
     monkeypatch.setattr(neb, "_neb_attempt", fake_attempt)
     r = build_slab(SlabConfig(size=(2, 2, 3), vacuum=8.0))

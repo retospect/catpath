@@ -48,6 +48,14 @@ class StateSpec:
             c[s["symbol"]] += 1
         return c
 
+    def placement_heights(self) -> list[float]:
+        """Intended height above the surface per adsorbate atom, in build order
+        (adsorbate atom ``n_slab + i`` <-> ``specs[i]``). The atom placed LOWEST
+        in each fragment is the one seated at a site — the ``*`` binding atom the
+        formula designates. Consumed by ``validate.binding_site_ok`` to check the
+        relaxed geometry actually binds through that atom, not a flipped one."""
+        return [float(s.get("height", 0.0)) for s in self.specs]
+
 
 @dataclass
 class StepSpec:

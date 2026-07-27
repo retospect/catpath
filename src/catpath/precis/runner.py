@@ -22,11 +22,10 @@ import io
 import json
 from typing import Any
 
-from .. import __version__
+from .. import __version__, provenance
 from ..config import Config
 from ..graph import build_graph
 from ..pipeline import Results, g_has_edge, run
-from .. import provenance
 
 
 def network_topology(config: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +128,13 @@ def _summary(cfg: Config, results: Results) -> dict[str, Any]:
             }
             for e in results.edges
         ],
+        # adsorption barrier the dissolving tether had to overcome to reseat a
+        # desorbing fragment (per state, plus the pathway max as a single trust /
+        # annotation signal precis can harvest). 0 => barrierless (spurious
+        # desorption legitimately rescued); large => genuine activated adsorption.
+        "adsorption_barriers": dict(results.ads_barriers),
+        "adsorption_barrier": (max(results.ads_barriers.values())
+                               if results.ads_barriers else 0.0),
         "warnings": results.warnings,
     }
 
