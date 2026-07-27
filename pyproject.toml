@@ -1,6 +1,6 @@
 [project]
 name = "catpath"
-version = "0.1.2"
+version = "0.2.0"
 description = "Reaction-pathway explorer for catalyst surfaces with ML interatomic potentials: reaction networks, NEB barriers, and cross-model uncertainty."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,6 +53,13 @@ dev = ["pytest>=8", "pytest-cov", "ruff"]
 # environment.  Declaring them as conflicting lets uv resolve each in its own
 # fork; install exactly ONE per env (or use `backend: auto` with whatever's there).
 [tool.uv]
+# The `precis` extra pins precis-mcp>=8.21 (needs KindSpec.can_own_jobs), which
+# isn't published yet — PyPI tops out at 8.4.3 — so the universal `uv lock`
+# resolution (which spans ALL extras, even though CI only installs `dev`) can't
+# be satisfied. This override relaxes precis-mcp to a resolvable version FOR
+# LOCKING ONLY; it does not touch the built wheel's declared deps, so
+# `pip install catpath[precis]` still requires >=8.21. Drop it once 8.21 ships.
+override-dependencies = ["precis-mcp<9"]
 conflicts = [[{ extra = "mace" }, { extra = "chgnet" },
               { extra = "fairchem" }, { extra = "grace" }]]
 
