@@ -1,7 +1,13 @@
-# Publish catpath to PyPI via Trusted Publishing (OIDC) — no API token needed.
+# Publish catpath (and its autocatpath alias) to PyPI via Trusted Publishing
+# (OIDC) — no API token needed.
 #
-# This file's NAME (workflow.yml), the repo (retospect/catpath) and the
-# environment (pypi) must match the PyPI trusted-publisher configuration.
+# `catpath` collided with an existing PyPI project, so we also ship the same
+# code under the `autocatpath` name. Both are separate PyPI projects but share
+# ONE trusted-publisher shape: repo retospect/catpath, this file (workflow.yml),
+# environment `pypi`. Configure a trusted publisher with those values on BOTH
+# the `catpath` and `autocatpath` PyPI projects. A single publish step uploads
+# both distributions — PyPI matches each file to its own project by name.
+#
 # Trigger: publishing a GitHub Release.  Also runnable manually.
 #
 # One-time GitHub setup: create an Environment named `pypi`
@@ -19,8 +25,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Build sdist + wheel
+      - name: Build catpath sdist + wheel
         run: uv build
+      - name: Build autocatpath alias sdist + wheel
+        # Same tree, PyPI project name overridden to autocatpath (name
+        # collision on `catpath`). Both name variants land in dist/.
+        run: |
+          sed -i 's/^name = "catpath"$/name = "autocatpath"/' pyproject.toml
+          uv build
       - uses: actions/upload-artifact@v4
         with:
           name: dist
