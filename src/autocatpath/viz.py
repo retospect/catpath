@@ -78,16 +78,90 @@ def _hump(x0, y0, x1, y1, y_peak, n=40):
     return np.concatenate([xa, xb]), np.concatenate([ya, yb])
 
 
+# Uphill "supply" (staging an adatom from the reservoir) is treated as barrierless
+# in the forward search, but an endothermic step still has a transition state at
+# least as high as its product.  A Brønsted–Evans–Polanyi estimate gives it a
+# nominal TS so the profile never shows an uncrossed uphill jump:
+#     Ea = max(alpha * dE + beta, dE, 0)
+# RENDERING ONLY -- drawn as a dashed hump (visually distinct from a computed NEB
+# barrier) and labelled with a leading "~"; it does NOT enter the reported
+# kinetics (barriers JSON, rate-limiting step).  Downhill / thermoneutral-forward
+# staging collapses to Ea=0 and stays a barrierless dotted connector.
+_SUPPLY_BEP_ALPHA = 1.0   # BEP transfer coefficient (slope vs dE)
+_SUPPLY_BEP_BETA = 0.15   # eV: intrinsic barrier at dE=0 (the above-product bump)
+
+
+def _supply_barrier(delta_e: float) -> float:
+    """BEP activation estimate for a supply step of reaction energy ``delta_e``."""
+    return max(_SUPPLY_BEP_ALPHA * delta_e + _SUPPLY_BEP_BETA, delta_e, 0.0)
+
+
+def _species_label(name: str) -> str:
+    """Surface-chemistry display label: star every adsorbed fragment.
+
+    State names join co-adsorbed fragments with ``+`` (a dissociated partner or a
+    staged reagent adatom) and may pin a site with ``@`` (``NO@top``). Each
+    fragment sits ON the surface, so each carries its own ``*`` in the standard
+    notation: ``N+O`` -> ``N*+O*``, ``NO@top`` -> ``NO*@top``, ``H2O`` -> ``H2O*``.
+    Display only — the underlying node names are unchanged.
+    """
+    out = []
+    for frag in name.split("+"):
+        if "@" in frag:  # site-pinned isomer, e.g. NO@top
+            base, site = frag.split("@", 1)
+            out.append(f"{base}*@{site}")
+        else:
+            out.append(f"{frag}*")
+    return "+".join(out)
+
+
+#: eV; two level labels in one column closer than this dodge to opposite sides.
+_LABEL_GAP = 0.7
+
+
+def _place_level_labels(ax, col_labels: dict) -> None:
+    """Place one species label per (column, level), staggering close neighbours.
+
+    Where several states share an x-column (competing branches at the same
+    reaction coordinate), their labels would overprint — colour already
+    identifies the path, so when two levels sit within ``_LABEL_GAP`` the lower
+    one flips BELOW its line while the upper stays above. Far-apart levels keep
+    the default above placement, so isolated labels look unchanged.
+    """
+    for i, items in col_labels.items():
+        items.sort(key=lambda t: t[0], reverse=True)  # top level first
+        prev_y = None
+        above = True
+        for y, sd, color, n in items:
+            if prev_y is not None and (prev_y - y) < _LABEL_GAP:
+                above = not above  # collision -> opposite side from the neighbour
+            else:
+                above = True       # clear column region -> default above
+            prev_y = y
+            sp = _species_label(n)
+            txt = sp if sd <= 1e-6 else f"{sp}\n({y:+.2f}±{sd:.2f})"
+            if above:
+                ax.text(i, y + sd + 0.05, txt, ha="center", va="bottom",
+                        fontsize=8, fontweight="bold", color=color, zorder=4)
+            else:
+                ax.text(i, y - sd - 0.05, txt, ha="center", va="top",
+                        fontsize=8, fontweight="bold", color=color, zorder=4)
+
+
 def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
                  caption: str | None = None, show_caption: bool = True,
                  png_meta: dict | None = None, thumbs: dict | None = None) -> None:
     """Reaction-coordinate energy diagram.
 
     Each species is a bold horizontal level line labelled with its name; each
-    reaction is a transition-state *bump* between two levels whose height above
-    the reactant equals the barrier; barrierless "supply" steps are dashed
-    connectors.  Every root->leaf pathway is drawn as its own coloured profile,
-    so competing pathways are overlaid on one plot.
+    reaction is a transition-state *bump* between two levels whose peak sits at
+    ``max(reactant + barrier, product)`` (an endothermic TS can't fall below the
+    product it connects to).  A barrierless "supply" step is a dotted connector
+    when downhill, or a dashed BEP *bump* (labelled ``~Ea``) when uphill so an
+    uphill jump is never drawn uncrossed -- see ``_supply_barrier`` (that estimate
+    is rendering-only and does not enter the reported kinetics).  Every root->leaf
+    pathway is drawn as its own coloured profile, so competing pathways are
+    overlaid on one plot.
 
     Uncertainty: level energies and barriers carry a +/- 1 s.d. band across
     samples (seeds x models).  ``caption`` (when ``show_caption``) is printed as a
@@ -106,7 +180,11 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
     cmap = plt.get_cmap("tab10")
     fig, ax = plt.subplots(figsize=(2 + 2.2 * max(len(p) for p in paths), 6))
     half = 0.34  # half-width of a level bar
-    labeled: set[tuple[int, str]] = set()
+    # (x-column -> [(y, sd, colour, name)]); first path to reach a level owns its
+    # colour. Collected here, then placed in a collision-aware second pass
+    # (_place_level_labels) so competing branches in a column don't overprint.
+    col_labels: dict[int, list[tuple]] = {}
+    seen: set[tuple[int, str]] = set()
 
     for pi, nodes in enumerate(paths):
         color = cmap(pi % 10)
@@ -117,20 +195,28 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
             if sd > 1e-6:  # +/- 1 s.d. band across seeds
                 ax.fill_between([i - half, i + half], [y - sd] * 2, [y + sd] * 2,
                                 color=color, alpha=0.18, lw=0, zorder=1)
-            if (i, n) not in labeled:  # label each level once per x position
-                lab = f"{n}" if sd <= 1e-6 else f"{n}\n({y:+.2f}±{sd:.2f})"
-                ax.text(i, y + sd + 0.03, lab, ha="center", va="bottom",
-                        fontsize=8, fontweight="bold", color=color, zorder=4)
-                labeled.add((i, n))
+            if (i, n) not in seen:  # record once per (column, state) for pass 2
+                seen.add((i, n))
+                col_labels.setdefault(i, []).append((y, sd, color, n))
         for i in range(len(nodes) - 1):
             u, v = nodes[i], nodes[i + 1]
             d = g[u][v]
             y0, y1 = ys[i], ys[i + 1]
             if d.get("kind") == "supply":
-                ax.plot([i + half, i + 1 - half], [y0, y1], ls=":",
-                        color=color, alpha=0.6, lw=1.5, zorder=2)
+                ea = _supply_barrier(y1 - y0)
+                if ea > 1e-3:  # uphill staging: nominal BEP TS so no uncrossed jump
+                    xs, yc = _hump(i + half, y0, i + 1 - half, y1, y0 + ea)
+                    ax.plot(xs, yc, ls="--", color=color, alpha=0.7, lw=1.5,
+                            zorder=2)
+                    ax.annotate(f"~{ea:.2f}", xy=((2 * i + 1) / 2, y0 + ea),
+                                xytext=(0, 4), textcoords="offset points",
+                                ha="center", fontsize=6.5, style="italic",
+                                color=color, alpha=0.85)
+                else:          # downhill/thermoneutral: barrierless connector
+                    ax.plot([i + half, i + 1 - half], [y0, y1], ls=":",
+                            color=color, alpha=0.6, lw=1.5, zorder=2)
             else:
-                peak = y0 + max(d["barrier"], 0.0)
+                peak = max(y0 + max(d["barrier"], 0.0), y1)  # TS can't sit below product
                 xs, yc = _hump(i + half, y0, i + 1 - half, y1, peak)
                 ax.plot(xs, yc, color=color, lw=2, zorder=2)
                 bsd = d.get("barrier_std", 0.0)
@@ -143,7 +229,10 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
                     ax.annotate(lab, xy=((2 * i + 1) / 2, peak + bsd),
                                 xytext=(0, 5), textcoords="offset points",
                                 ha="center", fontsize=7, color=color)
-        ax.plot([], [], color=color, lw=3, label=" -> ".join(nodes))
+        ax.plot([], [], color=color, lw=3,
+                label=" -> ".join(_species_label(n) for n in nodes))
+
+    _place_level_labels(ax, col_labels)  # pass 2: staggered, star-notation labels
 
     if thumbs:  # one thumbnail per state, above its (first) level line
         placed: dict = {}
