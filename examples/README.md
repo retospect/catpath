@@ -64,10 +64,56 @@ Useful overrides on any run: `--backend`, `--device cuda`, `--seeds 0,1,2`,
 
 | File | What it shows |
 |---|---|
-| `no_to_no3_pd.yaml` | basic oxidation run (`network: oxidation`) |
+| `no_to_no3_pd.yaml` | basic oxidation run (`network: oxidation`) — fully commented reference |
 | `no_to_nh3_pd.yaml` | reduction on the curated `ammonia` network |
 | `auto_ammonia.yaml` | `network: auto` — rule-based intermediate autodetection |
 | `no_reduction_only.yaml` | `reagents:` filter (H only) |
 | `no_to_nh3_pd_multimodel.yaml` | `mlip.models:` — pooled model+seed uncertainty |
 | `multi_substrate.yaml` | `substrates:` — several rows for `autocatpath multi` |
 | `render_povray.yaml` | `render.backend: povray` ray-traced thumbnails |
+
+## Notes
+
+**ML potential (`mlip.backend`).** Alternatives, one per line:
+
+| backend | notes |
+|---|---|
+| `emt` | dependency-free ASE potential; fast, qualitative. Only these elements: `Ag Al Au C Cu H N Ni O Pd Pt`. Default; ideal for dev/CI. |
+| `mace` | MACE-MP-0 universal ML potential (GPU), near-DFT. Foundation model size via `mlip.model: small\|medium\|large`. |
+| `chgnet` | CHGNet, CPU-friendly ML potential. |
+| `fairchem` | Meta FAIRChem / UMA (adsorbates on metals); `mlip.task:` picks the head (default `oc20`). |
+| `grace` | GRACE foundation models (TensorFlow). |
+| `auto` | pick the best ML backend actually installed. |
+
+The ML backends have conflicting dependencies — install exactly **one** per
+environment (`pip install "autocatpath[mace]"` etc.) or use `auto`. Pool several for
+combined model+seed error bars with `mlip.models: ["small", "medium"]` (each
+entry is a `model`, or `backend:model` to cross backends). `mlip.device` is
+`cpu`/`cuda` and only affects the torch backends (`mace`/`chgnet`/`fairchem`).
+
+**`search.seeds`.** A list of integers; each seed rattles the **adsorbate** atoms
+(Gaussian displacement, 0.15 Å; the slab stays frozen) into a different starting
+pose, relaxes it, and runs the NEB. Results are then pooled across seeds into a
+**mean ± spread** for every level and barrier — so seeds measure how robust each
+local minimum is: agreement gives a tight error bar, scatter is flagged
+low-confidence. Every seed is deterministic (seeded RNG), so a run reproduces
+exactly. Use **≥ 3** for a meaningful spread; a single seed is a point estimate
+with no uncertainty. (Seeds also drive the fresh poses tried during endpoint
+reseating.)
+
+**Case sensitivity.** Case-**sensitive**: `slab.element` (ASE symbol, `Pd` not
+`pd`), the `substrate` / `target` / `reagents` chemical formulas (`NH3`, `H`,
+`O` — parsed as element symbols, so casing matters, especially for
+`network: auto`), and the `network` name (`ammonia` / `branching` / `oxidation`
+/ `auto`). Case-**insensitive**: `mlip.backend` (`EMT` == `emt`). Quote chemical
+labels (`substrate: "NO"`) — autocatpath's loader un-coerces bare `NO`/`ON`/`OFF`,
+but quoting is the safe habit and matters if the value is copied into plain YAML.
+
+**Providing a slab.** The `slab:` block **builds** a clean fcc(111) surface from
+`element` + `size` (+ `vacuum`, `fix_layers`, optional lattice `a` /
+`relax_lattice`). To score a **pre-built** slab instead — an alloy, an adatom, a
+stepped facet, or custom constraints — hand it to the programmatic API (the
+precis `structure` seam: `run_pathway(..., slab_extxyz=...)`) as an ASE-readable
+geometry. The wire format is **extxyz** (lossless for cell, PBC, positions, and
+constraints). There is no YAML field for a slab file yet; from a config, the
+`slab:` block is the only path and it always builds fcc(111).
