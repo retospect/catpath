@@ -27,6 +27,14 @@ from ase.visualize.plot import plot_atoms  # noqa: E402
 TOP_VIEW = ""              # look straight down +z (surface normal)
 SIDE_VIEW = "-90x"         # look along the cell a-axis (surface edge-on)
 
+# Key light, above-left of the image plane (-x left, +y up, +z toward viewer).
+# ASE's default area_light sits at ~(2, 3, 40) -- essentially ON the camera axis
+# (camera is at <0,0,50>), so the spheres get washed flat with no highlight.
+# Raking the light off-axis casts the specular dot + soft shadow that reads as
+# 3-D. Given per view, so the highlight sits top-left in both top and side
+# thumbnails. Flip the x sign for above-right. [loc, colour, w, h, samples_x/y]
+_KEY_LIGHT = [(-25.0, 35.0, 40.0), "White", 6, 6, 3, 3]
+
 
 def povray_available() -> bool:
     """True when the ``povray`` binary is on PATH (the ray-traced backend)."""
@@ -107,7 +115,7 @@ def _write_pov_scene(sub, rotation: str, window: float, n_ads: int,
     cx, cy = _projected_center(sub, rotation, n_ads)
     bbox = (cx - window, cy - window, cx + window, cy + window)
     settings: dict = {"canvas_width": int(width), "transparent": True,
-                      "camera_type": "orthographic"}
+                      "camera_type": "orthographic", "area_light": _KEY_LIGHT}
     if bonds:
         settings["bondatoms"] = get_bondpairs(sub, radius=1.1)
     return write_pov(str(out_pov), sub, rotation=rotation, radii=0.6,

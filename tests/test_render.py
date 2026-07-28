@@ -57,6 +57,22 @@ def test_pov_scene_is_written_even_without_binary(tmp_path):
     assert "camera" in text and "orthographic" in text
 
 
+def test_pov_scene_lights_from_above_left(tmp_path):
+    """The key light is off the camera axis (above-left) so spheres get a
+    specular highlight instead of ASE's flat near-camera default."""
+    loc = render._KEY_LIGHT[0]
+    assert loc[0] < 0 and loc[1] > 0 and loc[2] > 0  # left, up, toward viewer
+    atoms, n_slab = _no_on_slab()
+    sub, _ = render.active_site(atoms, n_slab)
+    n_ads = len(atoms) - n_slab
+    window = render.view_window({"NO": atoms}, n_slab)
+    out = tmp_path / "scene.pov"
+    render._write_pov_scene(sub, render.TOP_VIEW, window, n_ads, out,
+                            width=200, bonds=True)
+    text = out.read_text()
+    assert "light_source" in text and f"{loc[0]:.2f}" in text  # our light, emitted
+
+
 @pytest.mark.skipif(not render.povray_available(),
                     reason="povray binary not installed")
 def test_povray_thumb_array_renders():
