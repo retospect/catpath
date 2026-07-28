@@ -1,11 +1,11 @@
-"""Persist a catpath run artifact onto a `pathway` ref.
+"""Persist a autocatpath run artifact onto a `pathway` ref.
 
 Shared by the two write paths so they stay identical:
 
 * the handler's **in-process** `put` (slice 0), and
-* the **`catpath_explore`** job dispatch (slice 1, runs on the pinned node).
+* the **`autocatpath_explore`** job dispatch (slice 1, runs on the pinned node).
 
-Imports only precis's public Store surface (no catpath deps), so it is cheap to
+Imports only precis's public Store surface (no autocatpath deps), so it is cheap to
 import inside the job dispatcher.
 """
 
@@ -21,7 +21,7 @@ def pathway_meta(artifact: dict[str, Any], *, extra: dict[str, Any] | None = Non
     snapshot, the reaction graph, the pooled-uncertainty results, warnings."""
     meta: dict[str, Any] = {
         "content_key": artifact["content_key"],
-        "catpath_version": artifact["catpath_version"],
+        "autocatpath_version": artifact["autocatpath_version"],
         "config": artifact["config"],
         "config_snapshot_yaml": artifact["config_snapshot_yaml"],
         "results": artifact["results_json"],

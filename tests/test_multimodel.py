@@ -1,7 +1,7 @@
 """Multi-model x multi-seed aggregation plumbing (EMT)."""
 
-from catpath.config import Config, MLIPConfig, SlabConfig
-from catpath import pipeline, provenance
+from autocatpath.config import Config, MLIPConfig, SlabConfig
+from autocatpath import pipeline, provenance
 
 
 def test_specs_single_and_multi():

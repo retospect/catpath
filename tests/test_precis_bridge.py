@@ -1,12 +1,12 @@
-"""Tests for the precis-mcp bridge (``catpath.precis``).
+"""Tests for the precis-mcp bridge (``autocatpath.precis``).
 
 Two layers:
 
-* the **pure runner** (``catpath.precis.runner``) — needs only catpath's own
+* the **pure runner** (``autocatpath.precis.runner``) — needs only autocatpath's own
   deps, so it always runs in CI;
-* the **handler** (``catpath.precis.handler.PathwayHandler``) — needs
+* the **handler** (``autocatpath.precis.handler.PathwayHandler``) — needs
   ``precis-mcp`` installed *and* a test Postgres at ``PRECIS_TEST_PG_URL``,
-  so it skips in a bare catpath checkout.
+  so it skips in a bare autocatpath checkout.
 """
 
 from __future__ import annotations
@@ -28,13 +28,13 @@ search: {seeds: [0], neb_images: 3, neb_max_steps: 15, neb_retries: 0, max_steps
 
 _MIG = (
     pathlib.Path(__file__).resolve().parent.parent
-    / "src/catpath/precis/migrations/0001_pathway_kind.sql"
+    / "src/autocatpath/precis/migrations/0001_pathway_kind.sql"
 )
 
 
-# --- pure runner: catpath-only, always runs -----------------------------
+# --- pure runner: autocatpath-only, always runs -----------------------------
 def test_runner_emt_smoke_and_determinism() -> None:
-    from catpath.precis import runner
+    from autocatpath.precis import runner
 
     art = runner.run_pathway_from_yaml(SMOKE)
     r = art["results_json"]
@@ -49,7 +49,7 @@ def test_runner_emt_smoke_and_determinism() -> None:
 
 
 def test_content_key_discriminates_config() -> None:
-    from catpath.precis import runner
+    from autocatpath.precis import runner
 
     base = {"name": "x", "mlip": {"backend": "emt"}}
     assert runner.content_key(base) != runner.content_key(
@@ -59,8 +59,8 @@ def test_content_key_discriminates_config() -> None:
 
 
 def test_chem_safe_yaml_keeps_NO_a_string() -> None:
-    # YAML 1.1 would coerce bare NO -> False; catpath's loader must not.
-    from catpath.precis import runner
+    # YAML 1.1 would coerce bare NO -> False; autocatpath's loader must not.
+    from autocatpath.precis import runner
 
     art = runner.run_pathway_from_yaml(SMOKE)
     assert art["config"]["substrate"] == "NO"
@@ -69,8 +69,8 @@ def test_chem_safe_yaml_keeps_NO_a_string() -> None:
 def test_network_topology_and_mermaid_no_compute() -> None:
     # The "argue before you compute" surface: build the network (rule-based, no
     # ML) and render it as text + mermaid.
-    from catpath.precis import runner
-    from catpath.precis.text_views import (
+    from autocatpath.precis import runner
+    from autocatpath.precis.text_views import (
         graph_to_mermaid,
         topology_to_mermaid,
         topology_to_text,
@@ -106,7 +106,7 @@ search: {seeds: [0], neb_images: 3, neb_max_steps: 12, neb_retries: 0, max_steps
 
 
 def test_analysis_over_computed_graph() -> None:
-    from catpath.precis import analysis, runner
+    from autocatpath.precis import analysis, runner
 
     art = runner.run_pathway_from_yaml(BRANCH)
     g, res = art["graph_json"], art["results_json"]
@@ -130,7 +130,7 @@ def test_analysis_over_computed_graph() -> None:
 
 def test_toon_views_and_aligned_compare() -> None:
     pytest.importorskip("precis")  # toon_views uses precis.format.toon
-    from catpath.precis import analysis, runner, toon_views
+    from autocatpath.precis import analysis, runner, toon_views
 
     a1 = runner.run_pathway_from_yaml(BRANCH)
     meta = {"graph": a1["graph_json"], "results": a1["results_json"],
@@ -159,7 +159,7 @@ def test_intermediates_and_steps_surface_structure_handles() -> None:
     # ingest.py) must round-trip into a drill-down handle an agent can hand
     # straight to get(kind='structure', id=..., view='atom').
     pytest.importorskip("precis")
-    from catpath.precis import runner, toon_views
+    from autocatpath.precis import runner, toon_views
 
     art = runner.run_pathway_from_yaml(BRANCH)
     states = art["results_json"]["pathway"]
@@ -209,7 +209,7 @@ def _apply_migration(store) -> None:
 
 
 def _yaml_dict(text: str) -> dict:
-    from catpath.config import _load_yaml
+    from autocatpath.config import _load_yaml
 
     return _load_yaml(text)
 
@@ -248,12 +248,12 @@ def test_pathway_skill_discoverable() -> None:
 
 
 @pytest.mark.skipif(not _DSN, reason="needs PRECIS_TEST_PG_URL + precis-mcp")
-def test_catpath_explore_dispatch_writes_back() -> None:
+def test_autocatpath_explore_dispatch_writes_back() -> None:
     pytest.importorskip("precis")
     from precis.store import Store
     from precis.store.types import BlockInsert
 
-    from catpath.precis import job, runner
+    from autocatpath.precis import job, runner
 
     store = Store.connect(_DSN)
     try:
@@ -279,7 +279,7 @@ def test_catpath_explore_dispatch_writes_back() -> None:
         assert ctx.status == "succeeded"
         got = store.get_ref(kind="pathway", id=slug)
         assert got.meta["results"]["nodes"], "results not written back"
-        assert got.meta["produced_by"] == "catpath_explore"
+        assert got.meta["produced_by"] == "autocatpath_explore"
         assert got.meta["ran_on"] == "spark"
         blocks = store.list_blocks_for_ref(got.id)
         assert blocks[0].text.startswith("# Methods")
@@ -294,9 +294,9 @@ def test_put_routes_to_pinned_node(monkeypatch) -> None:
     from precis.dispatch import Hub
     from precis.store import Store
 
-    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
-    monkeypatch.setenv("PRECIS_CATPATH_ROUTE_NODE", "spark")
-    from catpath.precis import PathwayHandler
+    monkeypatch.setenv("PRECIS_AUTOCATPATH_ENABLED", "1")
+    monkeypatch.setenv("PRECIS_AUTOCATPATH_ROUTE_NODE", "spark")
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:
@@ -310,13 +310,13 @@ def test_put_routes_to_pinned_node(monkeypatch) -> None:
             h.delete(id=slug)
 
         r = h.put(id="route_test", text=SMOKE)
-        assert "dispatched catpath compute" in r.body and "spark" in r.body, r.body
+        assert "dispatched autocatpath compute" in r.body and "spark" in r.body, r.body
 
         ref = store.get_ref(kind="pathway", id=slug)
         assert ref.meta["status"] == "computing"
         assert ref.meta["route_node"] == "spark"
 
-        # A catpath_explore job was minted, parented on the pathway ref (only
+        # A autocatpath_explore job was minted, parented on the pathway ref (only
         # possible because pathway.can_own_jobs → JOB_PARENT_KINDS extension),
         # over ssh_node, pinned to spark.
         with store.pool.connection() as c:
@@ -325,9 +325,9 @@ def test_put_routes_to_pinned_node(monkeypatch) -> None:
                 "AND deleted_at IS NULL",
                 (ref.id,),
             ).fetchall()
-        assert rows, "no catpath_explore job minted"
+        assert rows, "no autocatpath_explore job minted"
         job_id, jmeta = rows[0]
-        assert jmeta["job_type"] == "catpath_explore"
+        assert jmeta["job_type"] == "autocatpath_explore"
         assert jmeta["executor"] == "ssh_node"
         assert jmeta["params"]["target_node"] == "spark"
 
@@ -343,9 +343,9 @@ def test_handler_roundtrip() -> None:
     from precis.dispatch import Hub
     from precis.store import Store
 
-    os.environ["PRECIS_CATPATH_ENABLED"] = "1"
-    os.environ.pop("PRECIS_CATPATH_ROUTE_NODE", None)  # in-process path
-    from catpath.precis import PathwayHandler
+    os.environ["PRECIS_AUTOCATPATH_ENABLED"] = "1"
+    os.environ.pop("PRECIS_AUTOCATPATH_ROUTE_NODE", None)  # in-process path
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:
@@ -385,9 +385,9 @@ def test_preview_no_compute(monkeypatch) -> None:
     from precis.dispatch import Hub
     from precis.store import Store
 
-    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
-    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
-    from catpath.precis import PathwayHandler
+    monkeypatch.setenv("PRECIS_AUTOCATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_AUTOCATPATH_ROUTE_NODE", raising=False)
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:
@@ -420,9 +420,9 @@ def test_compare_view(monkeypatch) -> None:
     from precis.dispatch import Hub
     from precis.store import Store
 
-    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
-    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
-    from catpath.precis import PathwayHandler
+    monkeypatch.setenv("PRECIS_AUTOCATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_AUTOCATPATH_ROUTE_NODE", raising=False)
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:
@@ -453,9 +453,9 @@ def test_native_structure_ingest(monkeypatch) -> None:
     from precis.dispatch import Hub
     from precis.store import Store
 
-    monkeypatch.setenv("PRECIS_CATPATH_ENABLED", "1")
-    monkeypatch.delenv("PRECIS_CATPATH_ROUTE_NODE", raising=False)
-    from catpath.precis import PathwayHandler
+    monkeypatch.setenv("PRECIS_AUTOCATPATH_ENABLED", "1")
+    monkeypatch.delenv("PRECIS_AUTOCATPATH_ROUTE_NODE", raising=False)
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:
@@ -500,8 +500,8 @@ def test_handler_gated_off_by_default() -> None:
     from precis.dispatch import Hub, InitError
     from precis.store import Store
 
-    os.environ.pop("PRECIS_CATPATH_ENABLED", None)
-    from catpath.precis import PathwayHandler
+    os.environ.pop("PRECIS_AUTOCATPATH_ENABLED", None)
+    from autocatpath.precis import PathwayHandler
 
     store = Store.connect(_DSN)
     try:

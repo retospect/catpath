@@ -1,8 +1,8 @@
 """The ``pathway`` kind — a precis-mcp plugin handler.
 
-Slice 0 (dark, ``PRECIS_CATPATH_ENABLED``): a `pathway` ref owns a catpath
+Slice 0 (dark, ``PRECIS_AUTOCATPATH_ENABLED``): a `pathway` ref owns a autocatpath
 reaction-network run. ``put`` takes the config YAML as the body, runs the
-catpath pipeline **in-process on EMT** (cheap, qualitative), and persists:
+autocatpath pipeline **in-process on EMT** (cheap, qualitative), and persists:
 
 * the ``methods.md`` paragraph as the embedded/citable body chunk
   (``chunk_kind='pathway_body'``),
@@ -12,7 +12,7 @@ catpath pipeline **in-process on EMT** (cheap, qualitative), and persists:
 Regen is content-addressed: re-``put``ting an unchanged config is a no-op
 cache hit. Fan-out across ``(model, seed)`` and heavy backends move to the
 precis compute lane in later slices (see
-``docs/design/catpath-integration.md`` in precis-mcp). Native `structure`
+``docs/design/autocatpath-integration.md`` in precis-mcp). Native `structure`
 refs per intermediate (the ``pathway-node`` link) are slice 1 — deferred
 here because link relations are a closed `Relation` Literal in precis core
 and need a core edit to extend.
@@ -32,19 +32,19 @@ from precis.store.types import BlockInsert
 
 from .persist import BODY_KIND, pathway_title, persist_result
 
-#: When set, `put` routes the compute to a `catpath_explore` job pinned to this
-#: node instead of running catpath in-process (slice 1). The gateway sets it to
+#: When set, `put` routes the compute to a `autocatpath_explore` job pinned to this
+#: node instead of running autocatpath in-process (slice 1). The gateway sets it to
 #: the GPU node's PRECIS_NODE (e.g. 'spark'); unset → in-process EMT (slice 0).
-_ROUTE_NODE_ENV = "PRECIS_CATPATH_ROUTE_NODE"
+_ROUTE_NODE_ENV = "PRECIS_AUTOCATPATH_ROUTE_NODE"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 class PathwayHandler(Handler):
     spec: ClassVar[KindSpec] = KindSpec(
         kind="pathway",
-        title="Reaction pathway (catpath)",
+        title="Reaction pathway (autocatpath)",
         description=(
-            "A catalyst reaction-network exploration (catpath): give it a "
+            "A catalyst reaction-network exploration (autocatpath): give it a "
             "surface, substrate, and target as a YAML config body; it relaxes "
             "every intermediate and finds NEB barriers, reporting energies "
             "with pooled uncertainty (low-confidence flagged, not faked). "
@@ -60,7 +60,7 @@ class PathwayHandler(Handler):
         is_numeric=False,
         role="artifact",
         corpus_role="none",
-        # Own the derived catpath_explore compute job (ADR 0044 compute lane),
+        # Own the derived autocatpath_explore compute job (ADR 0044 compute lane),
         # so `put` can route the run to the pinned node instead of running it
         # in-process. Requires precis KindSpec.can_own_jobs (>= 8.22).
         can_own_jobs=True,
@@ -78,16 +78,16 @@ class PathwayHandler(Handler):
         # Gated dark: the kind only appears when explicitly enabled, so
         # the slice merges without exposing an in-process compute path by
         # default. (Mirrors PRECIS_SANDBOX_ENABLED / PRECIS_CLASSIFY_ENABLED.)
-        if os.environ.get("PRECIS_CATPATH_ENABLED", "") not in ("1", "true", "True"):
+        if os.environ.get("PRECIS_AUTOCATPATH_ENABLED", "") not in ("1", "true", "True"):
             raise InitError(
-                "pathway kind is off; set PRECIS_CATPATH_ENABLED=1 to enable"
+                "pathway kind is off; set PRECIS_AUTOCATPATH_ENABLED=1 to enable"
             )
-        # catpath (ase/rdkit/networkx) is a hard dep of catpath[precis], but
+        # autocatpath (ase/rdkit/networkx) is a hard dep of autocatpath[precis], but
         # guard so a broken env drops the kind cleanly instead of crashing boot.
         try:
             from . import runner  # noqa: F401
         except Exception as e:  # pragma: no cover - env-dependent
-            raise InitError(f"catpath pipeline unavailable: {e}") from e
+            raise InitError(f"autocatpath pipeline unavailable: {e}") from e
         _ = hub
 
     # -- put -------------------------------------------------------------
@@ -188,8 +188,8 @@ class PathwayHandler(Handler):
         existing: Any,
     ) -> Response:
         """Route the compute: ensure the pathway ref exists (status=computing),
-        then mint a `catpath_explore` job pinned to `node` (compute lane, ADR
-        0044). The node's ssh_node worker claims it and runs catpath there,
+        then mint a `autocatpath_explore` job pinned to `node` (compute lane, ADR
+        0044). The node's ssh_node worker claims it and runs autocatpath there,
         writing the result back onto this ref."""
         seed_meta = {
             "content_key": key,
@@ -199,7 +199,7 @@ class PathwayHandler(Handler):
             "slice": 1,
         }
         placeholder = (
-            f"# {slug}\n\ncatpath compute dispatched to **{node}** "
+            f"# {slug}\n\nautocatpath compute dispatched to **{node}** "
             f"(cache_key {key[:12]}). Results will replace this on completion."
         )
         with store.tx() as conn:
@@ -226,10 +226,10 @@ class PathwayHandler(Handler):
         from precis.handlers.job import JobHandler
 
         job = JobHandler(hub=self.hub).put(
-            job_type="catpath_explore",
+            job_type="autocatpath_explore",
             executor="ssh_node",
             parent_id=ref_id,
-            idem_key=f"catpath_explore:{key}",
+            idem_key=f"autocatpath_explore:{key}",
             params={
                 "pathway_ref_id": ref_id,
                 "pathway_slug": slug,
@@ -241,7 +241,7 @@ class PathwayHandler(Handler):
         )
         return Response(
             body=(
-                f"dispatched catpath compute for '{slug}' to {node} "
+                f"dispatched autocatpath compute for '{slug}' to {node} "
                 f"(cache_key {key[:12]}). {job.body}\n"
                 f"Track: get(kind='pathway', id='{slug}') — status 'computing' "
                 "until the job writes back."

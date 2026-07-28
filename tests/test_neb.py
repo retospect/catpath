@@ -5,10 +5,10 @@ the escalation logic is tested deterministically and fast; a small real EMT run
 checks the happy path.
 """
 
-from catpath import neb
-from catpath.calculators import make_calculator
-from catpath.config import MLIPConfig, SlabConfig
-from catpath.structures import build_slab, place_fragments
+from autocatpath import neb
+from autocatpath.calculators import make_calculator
+from autocatpath.config import MLIPConfig, SlabConfig
+from autocatpath.structures import build_slab, place_fragments
 
 
 def test_retry_escalates_until_converged(monkeypatch):

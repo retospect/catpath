@@ -1,18 +1,18 @@
-"""In-process catpath run → a self-contained, JSON-serialisable artifact.
+"""In-process autocatpath run → a self-contained, JSON-serialisable artifact.
 
-This is the *pure* half of the precis bridge: it imports **only catpath**
+This is the *pure* half of the precis bridge: it imports **only autocatpath**
 (no ``precis``), so it is importable and testable without precis-mcp
-installed. The precis-facing handler (``catpath.precis.handler``) calls
+installed. The precis-facing handler (``autocatpath.precis.handler``) calls
 ``run_pathway`` and persists what it returns.
 
-It mirrors :func:`catpath.pipeline.write_outputs` — same graph, same
+It mirrors :func:`autocatpath.pipeline.write_outputs` — same graph, same
 ``results.json`` shape, same ``methods.md`` — but assembles everything
 *in memory* and skips the matplotlib PNG rendering (deferred to a later
 slice), so it stays cheap and has no render-backend dependency.
 
 Slice 0 runs the whole pipeline inline on the EMT backend. Fan-out across
 ``(model, seed)`` and heavy backends move to the precis compute lane in
-slice 1 (see ``docs/design/catpath-integration.md`` in precis-mcp).
+slice 1 (see ``docs/design/autocatpath-integration.md`` in precis-mcp).
 """
 
 from __future__ import annotations
@@ -87,23 +87,23 @@ def effective_config(config: dict[str, Any], *, force_backend: str | None = None
 
 
 def content_key(config: dict[str, Any]) -> str:
-    """Content address for a pathway run: the config + the catpath version.
+    """Content address for a pathway run: the config + the autocatpath version.
 
     Regen is keyed on this — an unchanged config against an unchanged
-    catpath produces the same key, so the handler can skip re-running.
+    autocatpath produces the same key, so the handler can skip re-running.
     Deterministic: keys sorted, floats left as-is (config values are
-    small and exact). The catpath version is folded in so a code bump
-    invalidates stale artifacts (catpath itself does no hashing —
+    small and exact). The autocatpath version is folded in so a code bump
+    invalidates stale artifacts (autocatpath itself does no hashing —
     provenance is deterministic text only, so precis owns the key).
     """
     canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
-    payload = f"{canonical}\x00catpath=={__version__}"
+    payload = f"{canonical}\x00autocatpath=={__version__}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _summary(cfg: Config, results: Results) -> dict[str, Any]:
     """The ``results.json`` payload, byte-for-concept identical to
-    :func:`catpath.pipeline.write_outputs`."""
+    :func:`autocatpath.pipeline.write_outputs`."""
     from ..calculators import resolve_backend
 
     return {
@@ -192,16 +192,16 @@ def run_pathway(
     slab_extxyz: str | None = None,
     log: Any = lambda *a, **k: None,
 ) -> dict[str, Any]:
-    """Run catpath in-process and return a self-contained artifact.
+    """Run autocatpath in-process and return a self-contained artifact.
 
     ``config`` is the parsed pathway YAML (a plain dict). ``force_backend``
     overrides ``mlip.backend`` (slice 0 pins ``emt`` so an unconfigured or
     heavy-backend request still runs the cheap in-process path).
     ``slab_extxyz`` (optional) is an externally-prepared slab — the precis
-    ``structure`` seam: when given, catpath scores *that* slab instead of
+    ``structure`` seam: when given, autocatpath scores *that* slab instead of
     building an fcc(111) one from the config label, and the reaction's
     adsorbates are placed on it (clean-fcc(111) first cut). ``log`` is a
-    catpath-style logging callable (default: silent).
+    autocatpath-style logging callable (default: silent).
 
     The returned dict is JSON-serialisable end to end (no ASE ``Atoms``
     leak into it) and carries everything the handler persists:
@@ -227,7 +227,7 @@ def run_pathway(
 
     return {
         "content_key": content_key(effective),
-        "catpath_version": __version__,
+        "autocatpath_version": __version__,
         "config": effective,
         "config_snapshot_yaml": _snapshot_yaml(cfg),
         "results_json": _summary(cfg, results),
@@ -244,7 +244,7 @@ def run_pathway_from_yaml(
     force_backend: str | None = None,
     log: Any = lambda *a, **k: None,
 ) -> dict[str, Any]:
-    """Parse a pathway config YAML and run it. Uses catpath's chem-safe
+    """Parse a pathway config YAML and run it. Uses autocatpath's chem-safe
     loader, so ``substrate: NO`` stays the string ``"NO"`` (YAML 1.1 would
     coerce it to ``False``)."""
     from ..config import _load_yaml

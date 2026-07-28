@@ -1,5 +1,5 @@
 [project]
-name = "catpath"
+name = "autocatpath"
 version = "0.3.0"
 description = "Reaction-pathway explorer for catalyst surfaces with ML interatomic potentials: reaction networks, NEB barriers, and cross-model uncertainty."
 readme = "README.md"
@@ -45,7 +45,7 @@ grace = ["tensorpotential"]                    # TensorFlow-based
 # snakemake>=8 only supports Python >=3.11; the marker keeps the base package
 # (and every other extra) installable on 3.10 while gating orchestration to 3.11+.
 orchestration = ["snakemake>=8; python_version >= '3.11'"]
-# precis-mcp bridge: the `pathway` kind plugin (catpath.precis). Install
+# precis-mcp bridge: the `pathway` kind plugin (autocatpath.precis). Install
 # alongside precis-mcp on a node that hosts the MCP server / worker. The
 # plugin surface (Handler/KindSpec/entry points) is frozen since precis v6.
 precis = ["precis-mcp>=8.21,<9; python_version >= '3.11'"]
@@ -61,7 +61,7 @@ dev = ["pytest>=8", "pytest-cov", "ruff"]
 # resolution (which spans ALL extras, even though CI only installs `dev`) can't
 # be satisfied. This override relaxes precis-mcp to a resolvable version FOR
 # LOCKING ONLY; it does not touch the built wheel's declared deps, so
-# `pip install catpath[precis]` still requires >=8.21. Drop it once 8.21 ships.
+# `pip install autocatpath[precis]` still requires >=8.21. Drop it once 8.21 ships.
 # The python_version marker mirrors the extra's marker (precis-mcp needs >=3.11)
 # so the override doesn't silently re-introduce it on the 3.10 resolution fork.
 override-dependencies = ["precis-mcp<9; python_version >= '3.11'"]
@@ -74,31 +74,31 @@ Repository = "https://github.com/retospect/catpath"
 Issues = "https://github.com/retospect/catpath/issues"
 
 [project.scripts]
-catpath = "catpath.cli:main"
+autocatpath = "autocatpath.cli:main"
 
 # precis-mcp plugin discovery (only active when precis-mcp is installed in
-# the same environment; harmless metadata otherwise). See catpath.precis.
+# the same environment; harmless metadata otherwise). See autocatpath.precis.
 [project.entry-points."precis.handlers"]
-pathway = "catpath.precis:PathwayHandler"
+pathway = "autocatpath.precis:PathwayHandler"
 
 [project.entry-points."precis.migrations"]
-catpath = "catpath.precis.migrations"
+autocatpath = "autocatpath.precis.migrations"
 
 [project.entry-points."precis.job_types"]
-catpath_explore = "catpath.precis.job:load"
+autocatpath_explore = "autocatpath.precis.job:load"
 
 [project.entry-points."precis.skills"]
-catpath = "catpath.precis.skills"
+autocatpath = "autocatpath.precis.skills"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/catpath"]
+packages = ["src/autocatpath"]
 # Ensure the plugin migration SQL ships in the wheel (precis discovers it
 # via the precis.migrations entry point at runtime).
-artifacts = ["src/catpath/precis/migrations/*.sql", "src/catpath/precis/skills/*.md"]
+artifacts = ["src/autocatpath/precis/migrations/*.sql", "src/autocatpath/precis/skills/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

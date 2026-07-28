@@ -89,9 +89,9 @@ def ingest_intermediates(
             title=f"{pathway_slug}: {state}",
             scene=scene,
             version=1,
-            card_text=f"{state} — {len(scene.atoms)} atoms, catpath intermediate "
+            card_text=f"{state} — {len(scene.atoms)} atoms, autocatpath intermediate "
             f"of pathway {pathway_slug}",
-            description=f"catpath intermediate '{state}' of pathway {pathway_slug}",
+            description=f"autocatpath intermediate '{state}' of pathway {pathway_slug}",
         )
         out[state] = ref.id
         try:

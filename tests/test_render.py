@@ -8,9 +8,9 @@ matplotlib path.  The actual ray-trace runs only when `povray` is on PATH.
 import numpy as np
 import pytest
 
-from catpath import render
-from catpath.config import SlabConfig
-from catpath.network import build_ammonia_network
+from autocatpath import render
+from autocatpath.config import SlabConfig
+from autocatpath.network import build_ammonia_network
 
 
 def _no_on_slab():

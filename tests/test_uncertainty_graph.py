@@ -1,7 +1,7 @@
 import json
 
-from catpath.graph import build_graph, to_csv, to_json
-from catpath.uncertainty import Estimate, aggregate, rankings_consistent
+from autocatpath.graph import build_graph, to_csv, to_json
+from autocatpath.uncertainty import Estimate, aggregate, rankings_consistent
 
 
 def test_aggregate_mean_std():

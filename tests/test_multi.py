@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from catpath.config import Config, SlabConfig
-from catpath.multi import run_multi, write_multi
+from autocatpath.config import Config, SlabConfig
+from autocatpath.multi import run_multi, write_multi
 
 
 def tiny(tmp_path):

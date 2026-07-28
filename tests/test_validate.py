@@ -1,8 +1,8 @@
 import numpy as np
 
-from catpath.config import SlabConfig
-from catpath.structures import build_slab, place_fragments
-from catpath.validate import geometry_ok, is_similar, rmsd, sanitize_smiles
+from autocatpath.config import SlabConfig
+from autocatpath.structures import build_slab, place_fragments
+from autocatpath.validate import geometry_ok, is_similar, rmsd, sanitize_smiles
 
 
 def slab():

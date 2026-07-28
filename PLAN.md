@@ -1,4 +1,4 @@
-# catpath — Reaction Pathway Explorer
+# autocatpath — Reaction Pathway Explorer
 
 A reproducible, Snakemake-orchestrated pipeline that, given a **substrate** (or a
 set of substrates), an **environment** (e.g. a metal surface), optional

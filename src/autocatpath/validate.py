@@ -141,7 +141,7 @@ def binding_site_ok(
     """Check that each fragment binds the surface through the ``*``-designated atom.
 
     ``placement_heights[i]`` is the intended height of adsorbate atom ``n_slab+i``
-    (from its :class:`~catpath.network.StateSpec` spec); the LOWEST-placed atom in
+    (from its :class:`~autocatpath.network.StateSpec` spec); the LOWEST-placed atom in
     a fragment is the one the formula's ``*`` seats at the site. After relaxation
     the atom actually closest to the slab in each fragment must be the SAME ELEMENT
     as that intended anchor — comparing by element (not index) so a swap between

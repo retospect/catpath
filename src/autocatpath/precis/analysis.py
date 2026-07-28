@@ -18,7 +18,7 @@ from typing import Any
 
 def roots(graph: dict[str, Any], results: dict[str, Any]) -> tuple[str, str]:
     """Resolve the (root, target) node ids. The substrate *label* (``NO``) may
-    not be a node — catpath's oxidation root node is e.g. ``NO+O`` — so the root
+    not be a node — autocatpath's oxidation root node is e.g. ``NO+O`` — so the root
     is the first entry of the topological ``pathway`` order, and the target is
     the ``cfg.target`` node if present else the last path entry."""
     order = results.get("pathway", [])

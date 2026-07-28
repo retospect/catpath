@@ -1,17 +1,17 @@
-"""``catpath_explore`` job_type — run a catpath reaction-network exploration on
+"""``autocatpath_explore`` job_type — run a autocatpath reaction-network exploration on
 the pinned compute node and write the result back onto its `pathway` ref.
 
 This is the routing seam (slice 1). The `pathway` handler mints one of these
 jobs (`meta.executor='ssh_node'`, `meta.params.target_node=<node>`, parented on
 the pathway ref via the compute lane, ADR 0044). The `ssh_node` worker pass on
 that node — and only that node, per the target_node claim gate — claims it and
-invokes `dispatch()` here, which runs catpath **in-process** (catpath[precis] +
+invokes `dispatch()` here, which runs autocatpath **in-process** (autocatpath[precis] +
 the ML backend are installed in that node's worker venv) and persists the
 artifact. So the heavy relax/NEB runs where the hardware is; the gateway only
 mints the job.
 
 Registered via the ``precis.job_types`` entry point
-(``catpath_explore = catpath.precis.job:load``). Needs no host capability
+(``autocatpath_explore = autocatpath.precis.job:load``). Needs no host capability
 (``REQUIRES`` is empty); the node pin does the routing.
 """
 
@@ -24,7 +24,7 @@ from precis.workers.job_types import JobTypeSpec
 
 log = logging.getLogger(__name__)
 
-NAME = "catpath_explore"
+NAME = "autocatpath_explore"
 
 _PARAMS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -34,7 +34,7 @@ _PARAMS_SCHEMA: dict[str, Any] = {
         # The authoritative config (parsed YAML) to run.
         "config": {"type": "object"},
         # An externally-prepared slab (the precis `structure` seam) as extxyz;
-        # null → catpath builds an fcc(111) slab from the config label.
+        # null → autocatpath builds an fcc(111) slab from the config label.
         "slab_extxyz": {"type": ["string", "null"]},
         # Provenance: the precis structure ref the slab came from (for linking).
         "structure_ref": {"type": ["integer", "null"]},
@@ -50,11 +50,11 @@ _PARAMS_SCHEMA: dict[str, Any] = {
 }
 
 COMPATIBLE_EXECUTORS = frozenset({"ssh_node"})
-#: catpath needs no special host capability (empty ⊆ any executor's PROVIDES);
-#: the target_node pin routes it to the box with catpath + the backend installed.
+#: autocatpath needs no special host capability (empty ⊆ any executor's PROVIDES);
+#: the target_node pin routes it to the box with autocatpath + the backend installed.
 REQUIRES: frozenset[str] = frozenset()
 DESCRIPTION = (
-    "Run a catpath reaction-network exploration on the pinned node; "
+    "Run a autocatpath reaction-network exploration on the pinned node; "
     "write the graph + pooled-uncertainty result back onto the pathway ref."
 )
 
@@ -69,7 +69,7 @@ def _summarize(artifact: dict[str, Any]) -> dict[str, Any]:
     on any failure — a missing summary must never fail the run/persist.
     """
     try:
-        from catpath.precis import analysis
+        from autocatpath.precis import analysis
 
         graph = artifact.get("graph_json") or {}
         results = artifact.get("results_json") or {}
@@ -86,13 +86,13 @@ def _summarize(artifact: dict[str, Any]) -> dict[str, Any]:
             out["low_confidence"] = bool(summ["low_confidence"])
         return out
     except Exception:  # pragma: no cover - defensive
-        log.warning("catpath_explore: summary failed", exc_info=True)
+        log.warning("autocatpath_explore: summary failed", exc_info=True)
         return {}
 
 
 def _dispatch(ctx: Any, spec: Any) -> None:
     """Plugin dispatcher invoked by ``ssh_node`` for a claimed job. Runs the
-    catpath pipeline in-process on this node and persists the artifact onto the
+    autocatpath pipeline in-process on this node and persists the artifact onto the
     pathway ref. ``ctx`` is a precis DispatchContext (store / meta / append_chunk
     / set_meta / set_status / record_failure)."""
     params = (ctx.meta or {}).get("params") or {}
@@ -100,7 +100,7 @@ def _dispatch(ctx: Any, spec: Any) -> None:
         pathway_ref_id = int(params["pathway_ref_id"])
         config = dict(params["config"])
     except (KeyError, TypeError, ValueError) as exc:
-        ctx.record_failure(f"catpath_explore: malformed params ({exc})")
+        ctx.record_failure(f"autocatpath_explore: malformed params ({exc})")
         return
     force_backend = params.get("force_backend")
     slab_extxyz = params.get("slab_extxyz")
@@ -108,24 +108,24 @@ def _dispatch(ctx: Any, spec: Any) -> None:
     slab_src = "injected structure" if slab_extxyz else "label-built slab"
     ctx.append_chunk(
         "job_event",
-        f"catpath_explore: {config.get('name', '?')} backend={backend} ({slab_src})",
+        f"autocatpath_explore: {config.get('name', '?')} backend={backend} ({slab_src})",
     )
 
     try:
-        from catpath.precis import runner
+        from autocatpath.precis import runner
 
         artifact = runner.run_pathway(
             config, force_backend=force_backend, slab_extxyz=slab_extxyz
         )
     except Exception as exc:  # pragma: no cover - env/compute dependent
-        log.warning("catpath_explore: run failed", exc_info=True)
-        ctx.record_failure(f"catpath_explore: run failed: {exc}")
+        log.warning("autocatpath_explore: run failed", exc_info=True)
+        ctx.record_failure(f"autocatpath_explore: run failed: {exc}")
         return
 
     summary = _summarize(artifact)  # {barrier, span, low_confidence} or {}
 
     try:
-        from catpath.precis.persist import persist_result
+        from autocatpath.precis.persist import persist_result
 
         pathway_extra: dict[str, Any] = {
             "produced_by": NAME,
@@ -147,8 +147,8 @@ def _dispatch(ctx: Any, spec: Any) -> None:
             extra_meta=pathway_extra,
         )
     except Exception as exc:
-        log.warning("catpath_explore: persist failed", exc_info=True)
-        ctx.record_failure(f"catpath_explore: persist failed: {exc}")
+        log.warning("autocatpath_explore: persist failed", exc_info=True)
+        ctx.record_failure(f"autocatpath_explore: persist failed: {exc}")
         return
 
     r = artifact["results_json"]
@@ -163,7 +163,7 @@ def _dispatch(ctx: Any, spec: Any) -> None:
     b_s = f", barrier {summary['barrier']:g} eV" if "barrier" in summary else ""
     ctx.append_chunk(
         "job_summary",
-        f"catpath: {len(r['nodes'])} states, {len(r['edges'])} steps "
+        f"autocatpath: {len(r['nodes'])} states, {len(r['edges'])} steps "
         f"({r['n_samples']} samples, backend {r['backend']}) → pathway "
         f"#{pathway_ref_id}{b_s}.",
     )
@@ -171,7 +171,7 @@ def _dispatch(ctx: Any, spec: Any) -> None:
 
 
 def _run(*_a: Any, **_k: Any) -> Any:
-    raise NotImplementedError("catpath_explore runs via dispatch(), not run()")
+    raise NotImplementedError("autocatpath_explore runs via dispatch(), not run()")
 
 
 SPEC = JobTypeSpec(

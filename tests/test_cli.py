@@ -4,7 +4,7 @@ from argparse import Namespace
 
 import pytest
 
-from catpath.cli import _load
+from autocatpath.cli import _load
 
 
 def _ns(**kw):

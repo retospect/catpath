@@ -1,9 +1,9 @@
-"""catpath — reaction-pathway explorer for catalyst surfaces with ML potentials.
+"""autocatpath — reaction-pathway explorer for catalyst surfaces with ML potentials.
 
 A run is one YAML config, OR just command-line flags (no file needed):
 
-  catpath run --substrate NO --target NH3 --element Pd --network auto
-  catpath run my.yaml --backend mace          # config file + overrides
+  autocatpath run --substrate NO --target NH3 --element Pd --network auto
+  autocatpath run my.yaml --backend mace          # config file + overrides
 
 Commands:
   run <cfg>          run all seeds in-process, write graph/energy-map/results
@@ -14,7 +14,7 @@ Commands:
   sweep <cfg> --elements Pd,Pt,Cu   same network across surfaces
   seed / aggregate   one-seed partial / combine partials (Snakemake fan-out)
 
-The bare form ``catpath <cfg>`` is shorthand for ``catpath run <cfg>``.
+The bare form ``autocatpath <cfg>`` is shorthand for ``autocatpath run <cfg>``.
 Full field reference: docs/CONFIG.md. Every command takes the chemistry flags
 (--substrate/--target/--element/--network) and --backend/--device/--seeds/etc.
 """
@@ -46,15 +46,15 @@ def _load(args) -> Config:
         p = Path(path)
         if not p.exists():
             raise SystemExit(
-                f"catpath: config file not found: {path}\n"
+                f"autocatpath: config file not found: {path}\n"
                 "  hint: pass a YAML file (see examples/), or run with NO file and set the\n"
                 "  chemistry on the CLI:\n"
-                "    catpath run --substrate NO --target NH3 --element Pd --network auto")
+                "    autocatpath run --substrate NO --target NH3 --element Pd --network auto")
         try:
             cfg = Config.from_yaml(p)
         except Exception as e:  # noqa: BLE001 - surface any loader error with a hint
             raise SystemExit(
-                f"catpath: could not read config {path}: {e}\n"
+                f"autocatpath: could not read config {path}: {e}\n"
                 "  hint: the file must be YAML. Quote chemical labels — `substrate: \"NO\"`,\n"
                 "  because a bare NO is YAML's boolean false. See docs/CONFIG.md.") from e
     else:
@@ -71,7 +71,7 @@ def _load(args) -> Config:
     if getattr(args, "network", None):
         if args.network not in _NETWORKS:
             raise SystemExit(
-                f"catpath: unknown network '{args.network}'.\n"
+                f"autocatpath: unknown network '{args.network}'.\n"
                 f"  hint: choose one of {', '.join(_NETWORKS)} "
                 "(auto = autodetect intermediates).")
         cfg.network = args.network
@@ -86,7 +86,7 @@ def _load(args) -> Config:
         try:
             cfg.search.seeds = [int(s) for s in args.seeds.split(",")]
         except ValueError:
-            raise SystemExit(f"catpath: --seeds must be integers, e.g. --seeds 0,1,2 "
+            raise SystemExit(f"autocatpath: --seeds must be integers, e.g. --seeds 0,1,2 "
                              f"(got {args.seeds!r})") from None
     if getattr(args, "reagents", None) is not None:
         r = args.reagents.strip()
@@ -100,11 +100,11 @@ def _load(args) -> Config:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    # bare `catpath <cfg>` -> `catpath run <cfg>`
+    # bare `autocatpath <cfg>` -> `autocatpath run <cfg>`
     if argv and argv[0] not in _COMMANDS and not argv[0].startswith("-"):
         argv = ["run", *argv]
 
-    p = argparse.ArgumentParser(prog="catpath", description=__doc__)
+    p = argparse.ArgumentParser(prog="autocatpath", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     common = argparse.ArgumentParser(add_help=False)
@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "multi":
         specs = cfg.substrate_runs()
-        print(f"catpath multi: {len(specs)} substrate(s) on {cfg.slab.element}")
+        print(f"autocatpath multi: {len(specs)} substrate(s) on {cfg.slab.element}")
         multi = run_multi(cfg)
         outdir = write_multi(cfg, multi)
         print(f"\nDone -> {outdir}")
@@ -224,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "sweep":
         elements = [e.strip() for e in args.elements.split(",")]
-        print(f"catpath sweep: {cfg.substrate} -> {cfg.target} on {elements}")
+        print(f"autocatpath sweep: {cfg.substrate} -> {cfg.target} on {elements}")
         sweep = run_sweep(cfg, elements)
         outdir = write_sweep(cfg, sweep)
         print(f"\nDone -> {outdir}")
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # run
-    print(f"catpath: {cfg.substrate} -> {cfg.target} on {cfg.slab.element} "
+    print(f"autocatpath: {cfg.substrate} -> {cfg.target} on {cfg.slab.element} "
           f"[{cfg.mlip.backend}] seeds={cfg.search.seeds}")
     results = run(cfg)
     outdir = write_outputs(cfg, results)

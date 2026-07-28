@@ -1,16 +1,16 @@
-# Contributing to catpath
+# Contributing to autocatpath
 
-Thanks for your interest! catpath is a small project — currently maintained by
+Thanks for your interest! autocatpath is a small project — currently maintained by
 **Reto Stamm** — so the process is light. Issues and pull requests are welcome.
 
 ## Development setup
 
-catpath uses [`uv`](https://docs.astral.sh/uv/). The default **`emt`** backend is
+autocatpath uses [`uv`](https://docs.astral.sh/uv/). The default **`emt`** backend is
 pure numpy/ASE (no torch/GPU), so the whole test suite runs anywhere:
 
 ```bash
 git clone https://github.com/retospect/catpath
-cd catpath
+cd autocatpath
 uv sync --extra dev
 ```
 
@@ -52,7 +52,7 @@ By contributing you agree that your contributions are licensed under
 
 ## Acknowledgements
 
-catpath was requested by **Muhammad Umer**, whose help shaping what it should do
+autocatpath was requested by **Muhammad Umer**, whose help shaping what it should do
 got it off the ground — thank you.
 
 Built with **Claude Code** (Anthropic), with research assistance from

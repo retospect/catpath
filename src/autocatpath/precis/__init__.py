@@ -1,11 +1,11 @@
-"""precis-mcp bridge for catpath — the `pathway` kind.
+"""precis-mcp bridge for autocatpath — the `pathway` kind.
 
-Installed via ``pip install catpath[precis]`` and discovered by a running
+Installed via ``pip install autocatpath[precis]`` and discovered by a running
 precis-mcp server through the ``precis.handlers`` / ``precis.migrations``
-entry points (see ``catpath``'s ``pyproject.toml``). Design-of-record:
-``docs/design/catpath-integration.md`` in the precis-mcp repo.
+entry points (see ``autocatpath``'s ``pyproject.toml``). Design-of-record:
+``docs/design/autocatpath-integration.md`` in the precis-mcp repo.
 
-``PathwayHandler`` is exposed lazily so that ``catpath.precis.runner`` (the
+``PathwayHandler`` is exposed lazily so that ``autocatpath.precis.runner`` (the
 pure, precis-free half) stays importable in environments without
 precis-mcp installed — importing the handler pulls in ``precis``.
 """

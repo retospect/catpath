@@ -1,5 +1,5 @@
-from catpath.config import SlabConfig
-from catpath.network import (
+from autocatpath.config import SlabConfig
+from autocatpath.network import (
     Network,
     build_ammonia_network,
     build_branching_network,
@@ -7,7 +7,7 @@ from catpath.network import (
     build_oxidation_network,
     filter_by_reagents,
 )
-from catpath.structures import build_slab, place_fragments
+from autocatpath.structures import build_slab, place_fragments
 
 _SLAB = SlabConfig(size=(2, 2, 3))
 

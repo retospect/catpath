@@ -10,12 +10,12 @@ adsorption barrier as physically ~0 for barrierless O/Pd.
 
 from ase import Atoms
 
-from catpath import neb, pipeline
-from catpath.config import Config, SlabConfig
-from catpath.network import Network, StateSpec, StepSpec
-from catpath.relax import RelaxResult
-from catpath.structures import build_slab, place_fragments
-from catpath.validate import GeometryReport, binding_site_ok
+from autocatpath import neb, pipeline
+from autocatpath.config import Config, SlabConfig
+from autocatpath.network import Network, StateSpec, StepSpec
+from autocatpath.relax import RelaxResult
+from autocatpath.structures import build_slab, place_fragments
+from autocatpath.validate import GeometryReport, binding_site_ok
 
 
 def _tiny_cfg(tmp_path):

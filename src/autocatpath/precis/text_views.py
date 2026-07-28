@@ -1,4 +1,4 @@
-"""Text + Mermaid renderings of a catpath reaction network.
+"""Text + Mermaid renderings of a autocatpath reaction network.
 
 The point (per precis's ethos): the LLM should read and **argue with** the
 network as structured text, not squint at a rendered PNG. Two inputs:

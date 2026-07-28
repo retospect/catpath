@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 from ase import Atoms
 
-from catpath import pipeline
-from catpath.config import Config, SlabConfig
-from catpath.network import Network, StateSpec, StepSpec
-from catpath.relax import RelaxResult
-from catpath.structures import build_slab
-from catpath.validate import GeometryReport, geometry_ok
+from autocatpath import pipeline
+from autocatpath.config import Config, SlabConfig
+from autocatpath.network import Network, StateSpec, StepSpec
+from autocatpath.relax import RelaxResult
+from autocatpath.structures import build_slab
+from autocatpath.validate import GeometryReport, geometry_ok
 
 
 def tiny_cfg(tmp_path):

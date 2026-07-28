@@ -1,12 +1,12 @@
 ---
 id: precis-pathway-help
-title: precis — reaction pathways (catpath)
+title: precis — reaction pathways (autocatpath)
 summary: explore a catalyst reaction network — intermediates, barriers, honest uncertainty — and argue with it as data, not a diagram
 applies-to: get/put (kind='pathway')
 status: active
 ---
 
-# precis-pathway-help — reaction pathways (catpath)
+# precis-pathway-help — reaction pathways (autocatpath)
 
 A `pathway` is a **reaction-network exploration** on a catalyst surface. Give it
 an environment (a metal surface), a substrate, and a target; it builds the
@@ -105,7 +105,7 @@ Today's config knobs are the search space you explore:
   `mace` / `fairchem` (real ML potentials, GPU), and higher DFT rungs.
 - `search.seeds` — more seeds → a real mean ± spread (use ≥3 for confidence).
 
-More levers (dopants, facets, pH/potential) arrive as catpath grows; the calls
+More levers (dopants, facets, pH/potential) arrive as autocatpath grows; the calls
 above don't change — only what you can put in the config.
 
 ## Gotchas

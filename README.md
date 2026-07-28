@@ -1,8 +1,8 @@
-# catpath
+# autocatpath
 
 [![CI](https://github.com/retospect/catpath/actions/workflows/ci.yml/badge.svg)](https://github.com/retospect/catpath/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/catpath.svg)](https://pypi.org/project/catpath/)
-[![Python](https://img.shields.io/pypi/pyversions/catpath.svg)](https://pypi.org/project/catpath/)
+[![PyPI](https://img.shields.io/pypi/v/autocatpath.svg)](https://pypi.org/project/autocatpath/)
+[![Python](https://img.shields.io/pypi/pyversions/autocatpath.svg)](https://pypi.org/project/autocatpath/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
 **Reaction-pathway explorer for catalyst surfaces, driven by ML interatomic
@@ -26,13 +26,13 @@ uncertainty** — pooled across random seeds *and* across ML potentials.
 
 *NO→NH₃ on Pd (MACE): every intermediate as a level line, transition states as
 barrier bumps with Ea, competing pathways in colour, ± uncertainty bands — one
-`catpath run`.* **→ more outputs and their commands in the
+`autocatpath run`.* **→ more outputs and their commands in the
 [gallery](docs/GALLERY.md).**
 
 ## Install
 
 ```bash
-pip install catpath
+pip install autocatpath
 ```
 
 The default **`emt`** backend is pure numpy/ASE (no torch, no GPU) and runs the
@@ -41,26 +41,26 @@ add exactly one ML backend (their dependencies conflict, so **one per
 environment**):
 
 ```bash
-pip install "catpath[mace]"      # MACE-MP-0 universal potential (GPU)
-pip install "catpath[chgnet]"    # CHGNet (CPU-friendly)
-pip install "catpath[fairchem]"  # Meta FAIRChem / UMA (adsorbates on metals)
-pip install "catpath[grace]"     # GRACE foundation models
+pip install "autocatpath[mace]"      # MACE-MP-0 universal potential (GPU)
+pip install "autocatpath[chgnet]"    # CHGNet (CPU-friendly)
+pip install "autocatpath[fairchem]"  # Meta FAIRChem / UMA (adsorbates on metals)
+pip install "autocatpath[grace]"     # GRACE foundation models
 ```
 
 ## Quickstart
 
 ```bash
 # no config file needed — set the chemistry on the command line:
-catpath run --substrate NO --target NH3 --element Pd --network auto
+autocatpath run --substrate NO --target NH3 --element Pd --network auto
 
 # or point at a YAML config (see examples/):
-catpath run examples/no_to_no3_pd.yaml
+autocatpath run examples/no_to_no3_pd.yaml
 
 # discover the intermediates automatically, on a real ML potential:
-catpath run examples/auto_ammonia.yaml --backend auto
+autocatpath run examples/auto_ammonia.yaml --backend auto
 ```
 
-Run `catpath --help` (or `catpath run --help`) for every flag. Config files and
+Run `autocatpath --help` (or `autocatpath run --help`) for every flag. Config files and
 flags mix freely — flags override the file.
 
 Outputs land in `runs/<name>/`:
@@ -80,13 +80,13 @@ Because the backends can't share an environment, run `states` / `barriers` in
 each one's env, then `compare` the JSONs:
 
 ```bash
-catpath states   my.yaml --backend chgnet   --out s_chgnet.json
-catpath states   my.yaml --backend fairchem --out s_uma.json
-catpath compare  --states s_*.json --out intermediates.png     # box plot per state
+autocatpath states   my.yaml --backend chgnet   --out s_chgnet.json
+autocatpath states   my.yaml --backend fairchem --out s_uma.json
+autocatpath compare  --states s_*.json --out intermediates.png     # box plot per state
 
-catpath barriers my.yaml --backend chgnet   --out b_chgnet.json
-catpath compare  --states b_*.json --out barriers.png          # Ea, rate-limiting ringed
-catpath compare  --states b_*.json --heights s_*.json --out ts_heights.png
+autocatpath barriers my.yaml --backend chgnet   --out b_chgnet.json
+autocatpath compare  --states b_*.json --out barriers.png          # Ea, rate-limiting ringed
+autocatpath compare  --states b_*.json --heights s_*.json --out ts_heights.png
 ```
 
 ![Cross-model comparison of intermediate formation energies](https://raw.githubusercontent.com/retospect/catpath/main/docs/img/models_intermediates.png)
@@ -99,12 +99,12 @@ across models. See the [gallery](docs/GALLERY.md) and
 ## CLI
 
 ```
-catpath run <cfg>            # all seeds in-process + outputs
-catpath states <cfg>         # relax states only (no NEB) -> per-model JSON
-catpath barriers <cfg>       # NEB for every step -> per-model JSON
-catpath compare --states ... # box plots (states or barriers, auto-detected)
-catpath multi <cfg>          # several substrates -> union energy map
-catpath sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces
+autocatpath run <cfg>            # all seeds in-process + outputs
+autocatpath states <cfg>         # relax states only (no NEB) -> per-model JSON
+autocatpath barriers <cfg>       # NEB for every step -> per-model JSON
+autocatpath compare --states ... # box plots (states or barriers, auto-detected)
+autocatpath multi <cfg>          # several substrates -> union energy map
+autocatpath sweep <cfg> --elements Pd,Pt,Cu   # same network across surfaces
 ```
 
 Everything is one YAML file — see [`docs/CONFIG.md`](docs/CONFIG.md) for every
@@ -125,7 +125,7 @@ Reto Stamm.
 
 ## Acknowledgements
 
-catpath was requested by **Muhammad Umer**, whose help shaping what it should do
+autocatpath was requested by **Muhammad Umer**, whose help shaping what it should do
 got the project off the ground.
 
 Built with **Claude** (Anthropic) via Claude Code, with research assistance from
