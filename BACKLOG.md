@@ -80,6 +80,14 @@ priority-ordered within sections.
   retry with a ~1.5× denser band and 2× the step budget; return the first
   converged attempt else the most-refined one. Cut NO→NH3 EMT smoke
   non-convergence from 14/23 → 4/23. See `neb.neb_barrier`, `tests/test_neb.py`.
+- [x] **`mlip.dtype` knob (throughput)** — MACE precision is now config-tunable
+  (`mlip.dtype: float32|float64`, default float64 unchanged); float32 roughly
+  halves NEB/relax wall time for screening. Folded into the calculator memo key
+  so float32/float64 don't share a cached model. See `calculators.py`,
+  `tests/test_calculators.py`. **Follow-ups:** (a) per-stage split — float32
+  relax pre-pass then float64 NEB/TS refine (the accuracy-preserving win);
+  (b) SLURM/Snakemake fan-out of the seed×step grid (a full single-seed ammonia
+  NEB is ~4.4 h on one GB10 — throughput, not correctness, is the quest's wall).
 - [ ] **Strain sensitivity study** — option to vary lattice constant and measure
   how much adsorption energies shift (complements lattice relaxation).
 - [x] **ML potential registry + `auto`** — `make_calculator` now dispatches

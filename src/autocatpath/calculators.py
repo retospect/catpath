@@ -94,9 +94,10 @@ def _load(backend: str, cfg: MLIPConfig):
         if backend == "mace":
             from mace.calculators import mace_mp
 
-            # float64 is recommended for geometry optimization / NEB (vs float32).
+            # float64 (default) is recommended for geometry opt / NEB accuracy;
+            # cfg.dtype="float32" roughly halves wall time for screening runs.
             return mace_mp(model=cfg.model or "medium", device=cfg.device,
-                           default_dtype="float64")
+                           default_dtype=cfg.dtype)
         if backend == "chgnet":
             from chgnet.model.dynamics import CHGNetCalculator
 
@@ -136,14 +137,14 @@ def make_calculator(cfg: MLIPConfig, *, cache: bool = True) -> "Calculator":
     """Return an ASE calculator for ``cfg`` (``auto`` resolved to a backend).
 
     ML backends are memoized for the process lifetime and reused for an identical
-    ``(backend, model, device, task)`` — the model loads **once**, not once per
-    relaxation / NEB image (the load, not the force eval, dominates). Pass
+    ``(backend, model, device, task, dtype)`` — the model loads **once**, not once
+    per relaxation / NEB image (the load, not the force eval, dominates). Pass
     ``cache=False`` for a guaranteed-fresh instance; EMT is always fresh.
     """
     backend = resolve_backend(cfg.backend)
     if not cache or backend == "emt":
         return _load(backend, cfg)
-    key = (backend, cfg.model, cfg.device, cfg.task)
+    key = (backend, cfg.model, cfg.device, cfg.task, cfg.dtype)
     calc = _CALC_CACHE.get(key)
     if calc is None:
         calc = _load(backend, cfg)

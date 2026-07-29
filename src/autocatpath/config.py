@@ -53,6 +53,7 @@ class MLIPConfig:
     models: list[str] = field(default_factory=list)  # multi-model: each "model" or "backend:model"
     device: str = "cpu"
     task: str | None = None  # FAIRChem/UMA task head (defaults to "oc20": adsorbates on metals)
+    dtype: str = "float64"  # float64 (accurate, default) | float32 (~2x faster screen); mace only
 
     def specs(self) -> list[tuple[str, str | None]]:
         """(backend, model) pairs to run. Multi-model when ``models`` is set."""

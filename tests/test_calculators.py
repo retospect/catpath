@@ -42,6 +42,34 @@ def test_available_backends_shape():
     assert set(av) == {"emt", "mace", "chgnet", "fairchem", "grace"}
 
 
+def test_dtype_defaults_to_float64():
+    assert MLIPConfig().dtype == "float64"
+
+
+def test_dtype_parsed_from_config():
+    from autocatpath.config import Config
+
+    cfg = Config.from_dict(
+        {"substrate": "NO", "target": "NH3",
+         "mlip": {"backend": "mace", "dtype": "float32"}}
+    )
+    assert cfg.mlip.dtype == "float32"
+
+
+def test_calculator_cache_keys_on_dtype(monkeypatch):
+    """float32 and float64 must not share a cached calculator — the dtype is
+    part of the memo key, so a screening (float32) run never reuses an
+    accurate (float64) instance."""
+    C.reset_calculator_cache()
+    loads: list[str] = []
+    monkeypatch.setattr(C, "_load", lambda backend, cfg: loads.append(cfg.dtype) or object())
+    C.make_calculator(MLIPConfig(backend="mace", dtype="float64"))
+    C.make_calculator(MLIPConfig(backend="mace", dtype="float64"))  # cache hit
+    C.make_calculator(MLIPConfig(backend="mace", dtype="float32"))  # distinct key
+    assert loads == ["float64", "float32"]
+    C.reset_calculator_cache()
+
+
 def test_emt_element_guard():
     # emt supports the metal + N/O/H; rejects something it has no params for
     C.check_supported({"Pd", "N", "O", "H"}, MLIPConfig(backend="emt"))
