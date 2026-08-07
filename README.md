@@ -15,7 +15,15 @@ uncertainty** — pooled across random seeds *and* across ML potentials.
   intermediates (`network: auto`).
 - **Pluggable ML potentials** — `mace`, `chgnet`, `fairchem` (UMA), `grace`, or
   `auto` (best installed). `emt` is a dependency-free dev backend.
-- **Barriers** — climbing-image NEB with automatic retry on non-convergence.
+- **Barriers** — climbing-image NEB with automatic retry on non-convergence, and
+  a mid-band detachment guard that flags a barrier through a geometry where the
+  adsorbate flew off the slab.
+- **Electrochemistry (CHE)** — optional post-processing over a computed network:
+  closed-form limiting potential and span-minimizing operating potential (V vs
+  RHE), no extra relax/NEB calls.
+- **Screening vs verify** — `search.screening` skips NEB for a cheap
+  thermodynamic-only ranking pass; the ammonia network's `coadsorbed` template
+  is a verify tier that removes the fragment-parking approximation.
 - **Cross-model comparison** — run the same network under several potentials and
   box-plot where they agree and disagree (intermediates, barriers, and which
   transition state is the true rate-limiting "highest point").

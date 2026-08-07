@@ -25,6 +25,7 @@ search:
   neb_fmax: 0.1      # NEB band convergence
   neb_max_steps: 80
   neb_retries: 1     # retry a non-converged NEB with a denser band + more steps
+  neb_auto_retry: true # one more attempt at 2x neb_max_steps if still non-converged
   seeds: [0, 1, 2]   # ≥3 for a mean ± spread
   rmsd_thresh: 0.7   # Å, "same structure"
   energy_thresh: 0.05 # eV, spread tolerance → low_confidence flag
@@ -32,6 +33,13 @@ search:
 
 > The loader strips YAML's `NO/YES/ON/OFF → bool` coercion, but quoting labels is
 > still the safe habit.
+
+NEB robustness: if the relaxed band still has an interior image where the
+adsorbate has detached from the slab (not just the two endpoints), the barrier
+is flagged `low_confidence` rather than reported as-is — a barrier through a
+fictitious geometry is worse than no barrier. On plain non-convergence,
+`neb_auto_retry` (default on) gets one more attempt at double the step budget
+before giving up.
 
 ## CLI
 
@@ -66,6 +74,57 @@ non-overlapping columns (distinct energies share a column, clusters shift right)
 uv run catpath           states cmp.yaml --backend mace     --device cuda --out s_mace.json
 uv run catpath compare --states s_*.json --out compare.png
 ```
+
+## Electrochemistry (CHE)
+
+Add an `electrochemistry:` block (see [`CONFIG.md`](CONFIG.md), §Electrochemistry,
+for every field) and `results.json` gains a scalar bundle on top of the usual
+nodes/edges/warnings — pure post-processing over energies the run already
+computed, no new relax/NEB calls:
+
+```yaml
+electrochemistry:
+  U_vs_RHE: "optimal"
+  pH: 7.0
+```
+
+| key | meaning |
+|---|---|
+| `U_L` | limiting potential (V vs RHE) — the full-DAG worst electrochemical (H-supply) step, not just the target path |
+| `U_opt`, `span_at_Uopt` | the potential minimizing the energetic span, and that span, over the DAG's required leaves (target + every parked/desorbed fragment's sink) |
+| `span_at_UL` | the DAG span evaluated at `U_L` |
+| `span_target_at_Uopt` | the target-path-only span at the DAG-optimal `U_opt` — a diagnostic, not the headline |
+| `P_side` | `1 - P(main path)`: probability the mechanism takes a side branch, from guarded kinetic fork fractions along the target path; `null` ("insufficient data") if any fork's competing barrier is missing or flagged |
+| `T` | temperature (K) used for `P_side`'s Boltzmann weights |
+
+`results.json` also always carries `template` (`"parked"`/`"coadsorbed"`) and,
+when `search.screening` is on, `screening: true` — independent of whether
+`electrochemistry:` is configured; see §Screening vs verify tiers below.
+
+Potentials are referenced to RHE (pH-independent for every proton-electron
+transfer step here) — pass `pH` only if you want an SHE display conversion.
+The whole module is **thermodynamic-only**: no β (Brønsted-Evans-Polanyi)
+symmetry factor on the CHE step, and no solvation or coverage-dependent
+correction — it shifts state energies with the applied potential, not
+barriers or site chemistry.
+
+## Screening vs verify tiers
+
+Two knobs trade cost for fidelity, independent of each other:
+
+- **`search.screening: true`** — relax-only: every edge gets its endpoint
+  energies but no NEB, so no barrier ever appears (not even a fabricated
+  `0.0`) — a cheap thermodynamic ranking pass. Barriers are absent **by
+  design**, not a bug.
+- **`template: coadsorbed`** (ammonia network only) — the verify tier: removes
+  the fragment-parking approximation, so both dissociated fragments stay
+  co-adsorbed until a product actually desorbs, exposing which-fragment-first
+  selectivity the `parked` template can't see. Roughly 2x the NEB count of
+  `parked`.
+
+Typical flow: screen candidates cheap (`screening: true`, `template: parked`),
+then verify the winners at full cost (`screening: false`, `template:
+coadsorbed`).
 
 ## Snakemake
 

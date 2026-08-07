@@ -8,6 +8,7 @@ name: nh3_run                # output folder name (runs/<name>/)
 substrate: "NO"              # starting species label (QUOTE it — bare NO = YAML false)
 target: "NH3"                # ending species label
 network: ammonia             # ammonia|branching|oxidation (curated) OR auto (see §Intermediates)
+template: parked             # ammonia only: parked (default) | coadsorbed -> see §Template
 reagents: ["H"]              # WHICH adatoms are available (filters branches) -> see §Reagents
                              #   omit for the full template; [] = reagent-free (dissociation) only
 
@@ -34,8 +35,10 @@ search:
   neb_fmax: 0.1              # NEB band convergence
   neb_max_steps: 150
   neb_retries: 1             # retry a non-converged NEB with a denser band + more steps
+  neb_auto_retry: true       # one more attempt at 2x neb_max_steps if still non-converged
   rmsd_thresh: 0.7           # Å, "same structure" threshold
   energy_thresh: 0.05        # eV, spread over this -> low_confidence flag
+  screening: false           # relax-only: skip NEB, no barriers at all -> see §Screening
 
 auto:                        # only used when network: auto  -> see §Intermediates
   max_extra: 4               # reagent-atom budget = len(substrate atoms) + this
@@ -52,6 +55,12 @@ render:                      # how active-site thumbnails/gallery are drawn
   bonds: true                # povray ball-and-stick bonds
 
 outdir: runs
+
+electrochemistry:             # optional; omit entirely for no CHE post-processing -> see §Electrochemistry
+  U_vs_RHE: 0.0                # V vs RHE, or the literal string "optimal"
+  pH: null                     # optional; RHE<->SHE display conversion only
+  T: 298.15                    # K
+  U_window: null               # optional [lo, hi] V bound for the U_opt search
 ```
 
 ## §Potentials — pluggable ML backends ✅
@@ -93,6 +102,17 @@ mean ± spread; bump to 5–10 if a state is flagged low-confidence.
 `backend:model` (e.g. `mace:small`, `fairchem:<ckpt>`) to mix backends. Every
 `(model × seed)` combination is run and pooled, so error bars capture **both**
 model and seed variance. Leave `models: []` and set `model:` for a single model.
+
+## §Screening — relax-only thermodynamic tier ✅
+`search.screening: true` skips NEB (and the linear-interpolation barrier
+fallback) entirely — every edge relaxes both endpoints as usual but is left
+with **no `barrier` key at all** (never a fabricated `0.0`), so `results.json`
+edges carry `delta_e` only. Roughly 2x cheaper than a full run (no climbing-image
+search), for ranking candidates on thermodynamics before committing to barriers.
+`U_L`/`P_side` are unaffected (node-energy-only); the energetic span (with
+`electrochemistry:` set) falls back to a purely thermodynamic climb between
+state energies. Default `false` (barriers computed as normal). `results.json`
+gets `"screening": true` when on (key absent when off).
 
 ## §Reagents — first-class filter ✅
 `reagents:` lists **which adatoms are available** (`["H"]`, `["H", "O"]`, `[]`).
@@ -168,18 +188,37 @@ template is still the tuned choice for a production run. `auto` is for
 
 ## §Substrates — multi-substrate via `catpath multi` ✅
 Give `substrates:` a list of **spec dicts** (`{substrate, target, network,
-reagents}`; omitted fields inherit the top-level values) and run
+template, reagents}`; omitted fields inherit the top-level values) and run
 `catpath multi my.yaml`. Each entry gets its own full run + per-run artifacts,
 and all rows are stacked into one **union-column** energy map
 (`runs/<name>_multi/energy_map.png`): columns are the union of every network's
 states, cells are blank/`NaN` where a substrate never visits that state, and the
 ★ rate-limiting marker tolerates the gaps. A bare-string entry (`- "NO"`) still
-works and inherits the top-level target/network/reagents.
+works and inherits the top-level target/network/reagents/template.
 
 Two other multi-row paths:
 - **`catpath sweep --elements Pd,Pt,Cu,Ni`** — same network across surfaces
   (catalyst screen); columns align exactly (intersection).
 - Run once per substrate and combine the maps by hand.
+
+## §Template — parked vs coadsorbed (`ammonia` only) ✅
+`template:` picks between two variants of the `ammonia` network's dissociative
+branch:
+
+| `template:` | behavior |
+|---|---|
+| `parked` (default) | after `NO -> N+O`, whichever fragment isn't being hydrogenated is approximated as parking off to a reservoir instantly — the original, cheaper network |
+| `coadsorbed` | removes that approximation: both `N*`/`O*` fragments stay co-adsorbed in-cell, forking on which one takes each supplied H, until a product (H2O or NH3) actually desorbs — the **verify tier**, exposing which-fragment-first selectivity |
+
+```yaml
+network: ammonia
+template: coadsorbed
+```
+
+`coadsorbed` roughly doubles the NEB count (twice the fork states) and is
+invalid for any other `network:` kind (`ValueError`). Override per-row via
+`substrates:` (§Substrates above). `results.json` always stamps the active
+`"template"`.
 
 ## §Rendering — matplotlib default, optional POV-Ray ✅
 `render.backend` picks how the active-site thumbnails and gallery are drawn:
@@ -196,6 +235,26 @@ absent, catpath **prints a warning, records it in `results.json`, and falls back
 to matplotlib** — the run never fails. Override at the CLI is via the config
 `render:` block (no dedicated flag).
 
+## §Electrochemistry — CHE post-processing ✅
+`electrochemistry:` (omit the block entirely for none — pure post-processing
+over energies the run already computed, no new relax/NEB calls) turns on the
+computational-hydrogen-electrode (CHE) figures in `results.json` — see
+[USAGE.md](USAGE.md), §Electrochemistry (CHE), for what you get and its scope.
+
+| field | what | default |
+|---|---|---|
+| `U_vs_RHE` | operating potential (V vs RHE), or the literal string `"optimal"` — `U_L`/`U_opt` are always computed either way (closed-form, cheap); this is provenance for downstream display | `0.0` |
+| `pH` | optional; only matters for RHE↔SHE display conversion (every PCET step here is pH-independent on the RHE scale) | `null` |
+| `T` | temperature (K) | `298.15` |
+| `U_window` | optional `[lo, hi]` V bound for the `U_opt` search; `null` searches the unbounded closed form | `null` |
+
+```yaml
+electrochemistry:
+  U_vs_RHE: "optimal"
+  pH: 7.0
+  U_window: [-1.0, 1.0]
+```
+
 ---
 
 ### Summary
@@ -209,3 +268,6 @@ to matplotlib** — the run never fails. Override at the CLI is via the config
 | Substrates (how many) | `substrates: [...]` + `catpath multi` | ✅ multi-substrate |
 | Surface / lattice | `slab:` block (auto-relaxed) | ✅ first-class |
 | Rendering | `render.backend: matplotlib\|povray` | ✅ first-class (povray optional) |
+| Screening (relax-only tier) | `search.screening: true` | ✅ first-class |
+| Template (ammonia dissociation) | `template: parked\|coadsorbed` | ✅ first-class |
+| Electrochemistry (CHE) | `electrochemistry:` block | ✅ first-class |
