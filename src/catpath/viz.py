@@ -53,7 +53,8 @@ def draw_graph(g: nx.DiGraph, path: str | Path, title: str = "Reaction graph",
                            connectionstyle="arc3,rad=0.05")
     elabels = {
         (u, v): f"Ea={d['barrier']:.2f}\n±{d['barrier_std']:.2f} eV"
-        for u, v, d in g.edges(data=True) if d.get("kind") != "supply"
+        for u, v, d in g.edges(data=True)
+        if d.get("kind") != "supply" and "barrier" in d  # absent in SCREENING mode
     }
     nx.draw_networkx_edge_labels(g, pos, edge_labels=elabels, ax=ax, font_size=8)
     if thumbs:
@@ -130,16 +131,19 @@ def draw_profile(g, path: str | Path, title: str = "Reaction energy profile",
                 ax.plot([i + half, i + 1 - half], [y0, y1], ls=":",
                         color=color, alpha=0.6, lw=1.5, zorder=2)
             else:
-                peak = y0 + max(d["barrier"], 0.0)
+                # SCREENING mode: no `barrier` attribute at all -- draw a
+                # flat (no-hump) connector rather than fabricating a peak.
+                barrier = d.get("barrier")
+                peak = y0 + max(barrier, 0.0) if barrier is not None else y0
                 xs, yc = _hump(i + half, y0, i + 1 - half, y1, peak)
                 ax.plot(xs, yc, color=color, lw=2, zorder=2)
                 bsd = d.get("barrier_std", 0.0)
                 if bsd > 1e-6:  # barrier uncertainty as a cap at the TS
                     ax.errorbar((2 * i + 1) / 2, peak, yerr=bsd, color=color,
                                 capsize=3, elinewidth=1, zorder=2)
-                if d["barrier"] > 1e-3:
-                    lab = (f"Ea={d['barrier']:.2f}" if bsd <= 1e-6
-                           else f"Ea={d['barrier']:.2f}±{bsd:.2f}")
+                if barrier is not None and barrier > 1e-3:
+                    lab = (f"Ea={barrier:.2f}" if bsd <= 1e-6
+                           else f"Ea={barrier:.2f}±{bsd:.2f}")
                     ax.annotate(lab, xy=((2 * i + 1) / 2, peak + bsd),
                                 xytext=(0, 5), textcoords="offset points",
                                 ha="center", fontsize=7, color=color)

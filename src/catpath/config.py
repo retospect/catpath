@@ -100,6 +100,14 @@ class SearchConfig:
     # similarity / acceptance thresholds
     rmsd_thresh: float = 0.7  # A
     energy_thresh: float = 0.05  # eV (~1 kcal/mol) for "same" energy
+    # SCREENING mode: relax-only cheap thermodynamic tier -- endpoint
+    # relaxations (bind preflight included) run exactly as usual, but NEB
+    # (and the linear-interpolation barrier fallback) never runs at all. Every
+    # edge is left with NO `barrier` key -- never a fabricated 0.0 -- so U_L /
+    # span / rate_Ea downstream are honestly thermodynamic-only figures, not a
+    # disguised (and wrong) kinetic estimate. See pipeline.run_one_seed /
+    # aggregate_partials / graph.build_graph / electrochem._apply_electrochemistry.
+    screening: bool = False
 
 
 @dataclass

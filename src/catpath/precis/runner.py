@@ -107,7 +107,7 @@ def _summary(cfg: Config, results: Results) -> dict[str, Any]:
     :func:`catpath.pipeline.write_outputs`."""
     from ..calculators import resolve_backend
 
-    return {
+    out: dict[str, Any] = {
         "name": cfg.name,
         "substrate": cfg.substrate,
         "target": cfg.target,
@@ -124,13 +124,18 @@ def _summary(cfg: Config, results: Results) -> dict[str, Any]:
                 "name": e["name"],
                 "reactant": e["reactant"],
                 "product": e["product"],
-                "barrier": e["barrier"].as_dict(),
+                # SCREENING mode: no "barrier" key on the edge at all -- see
+                # SearchConfig.screening / pipeline.aggregate_partials.
+                **({"barrier": e["barrier"].as_dict()} if "barrier" in e else {}),
                 "delta_e": e["delta_e"].as_dict(),
             }
             for e in results.edges
         ],
         "warnings": results.warnings,
     }
+    if cfg.search.screening:
+        out["screening"] = True
+    return out
 
 
 def _graph_json(results: Results) -> dict[str, Any]:

@@ -305,7 +305,7 @@ def run_barriers(cfg: Config, log=print) -> dict:
         for sname, s in part["steps"].items():
             d = steps.setdefault(sname, {"barrier": [], "delta_e": [],
                                          "reactant": s["reactant"], "product": s["product"]})
-            if s["barrier"] is not None:
+            if s.get("barrier") is not None:  # absent in SCREENING mode -- see run_one_seed
                 d["barrier"].append(s["barrier"])
             if s["delta_e"] is not None:
                 d["delta_e"].append(s["delta_e"])
@@ -355,23 +355,36 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
             if not res.converged:
                 warnings.append(f"{st.name} seed={seed} not converged")
 
-        log(f"[{step.name}] seed={seed}: NEB")
-        entry = {"reactant": step.reactant.name, "product": step.product.name,
-                 "barrier": None, "delta_e": None}
-        if not (r_bound and p_bound):
+        bound = r_bound and p_bound
+        # SCREENING mode: relax-only -- entry carries NO `barrier` key at all
+        # (see SearchConfig.screening); `delta_e` is still free (it's just
+        # product energy minus reactant energy, no NEB required).
+        entry = ({"reactant": step.reactant.name, "product": step.product.name,
+                  "delta_e": None} if cfg.search.screening else
+                 {"reactant": step.reactant.name, "product": step.product.name,
+                  "barrier": None, "delta_e": None})
+        if not bound:
             # endpoint binding pre-flight failed -- an honest "no barrier" beats a
             # climbing-image NEB anchored on a desorbed endpoint (garbage geometry
             # in, garbage barrier out).
-            for st, geo, bound in ((step.reactant, r_geo, r_bound),
-                                   (step.product, p_geo, p_bound)):
-                if not bound:
+            for st, geo, b_ok in ((step.reactant, r_geo, r_bound),
+                                  (step.product, p_geo, p_bound)):
+                if not b_ok:
                     warnings.append(
                         f"{st.name} seed={seed} INFEASIBLE: adsorbate does not bind — "
                         f"detached, desorbs to {geo.adsorbate_height:.1f} A after "
                         f"restrained relax; try a different site or dopant")
-            log(f"[{step.name}] seed={seed}: NEB skipped (endpoint does not bind)")
+            what = "screening" if cfg.search.screening else "NEB"
+            log(f"[{step.name}] seed={seed}: {what} skipped (endpoint does not bind)")
             steps[step.name] = entry
             continue
+        if cfg.search.screening:
+            entry["delta_e"] = p_res.energy - r_res.energy
+            log(f"[{step.name}] seed={seed}: screening — relax-only, no NEB "
+                f"(dE={entry['delta_e']:.3f} eV)")
+            steps[step.name] = entry
+            continue
+        log(f"[{step.name}] seed={seed}: NEB")
         try:
             bar = neb_barrier(
                 r_res.atoms, p_res.atoms,
@@ -454,7 +467,9 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
             state_vals.setdefault(name, []).append(e - ref if ref is not None else e)
         for sname, s in p["steps"].items():
             step_meta[sname] = (s["reactant"], s["product"])
-            if s["barrier"] is not None:  # barriers are already relative
+            # `s.get("barrier")` -- absent entirely in SCREENING mode (see
+            # run_one_seed), never a raw None-under-a-present-key.
+            if s.get("barrier") is not None:  # barriers are already relative
                 step_bar.setdefault(sname, []).append(s["barrier"])
             if s["delta_e"] is not None:
                 step_de.setdefault(sname, []).append(s["delta_e"])
@@ -464,14 +479,18 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
     for name, vals in state_vals.items():
         results.node_energies[name] = aggregate(vals, cfg.search.energy_thresh)
     for sname, (r, pr) in step_meta.items():
-        barrier_est = aggregate(step_bar.get(sname, []), cfg.search.energy_thresh)
-        if step_low_conf.get(sname):
-            barrier_est.low_confidence = True
-        results.edges.append({
+        edge: dict = {
             "name": sname, "reactant": r, "product": pr,
-            "barrier": barrier_est,
             "delta_e": aggregate(step_de.get(sname, []), cfg.search.energy_thresh),
-        })
+        }
+        if not cfg.search.screening:
+            # SCREENING mode: no `barrier` key at all -- never a fabricated
+            # 0.0, and never a NaN Estimate standing in for "never computed".
+            barrier_est = aggregate(step_bar.get(sname, []), cfg.search.energy_thresh)
+            if step_low_conf.get(sname):
+                barrier_est.low_confidence = True
+            edge["barrier"] = barrier_est
+        results.edges.append(edge)
     results.models = sorted(models)
     return results
 
@@ -482,6 +501,8 @@ def run(cfg: Config, log=print) -> Results:
     Model uncertainty (from ``mlip.models``) and seed uncertainty are pooled into
     one mean +/- spread per level and barrier.
     """
+    if cfg.search.screening:
+        log("screening mode: relax-only, no NEB — barriers absent, spans thermodynamic")
     partials: list[dict] = []
     structures: dict[str, tuple] = {}
     lattice: dict[str, float] = {}
@@ -579,6 +600,12 @@ def _apply_electrochemistry(g, cfg: Config, results: Results, log=print) -> dict
         return None
 
     node_energy0 = {n: d["rel_energy"] for n, d in g.nodes(data=True)}
+    # `.get("barrier", 0.0)`: a SCREENING-mode reaction edge has NO `barrier`
+    # attribute at all (build_graph never fabricates one) -- it falls to a
+    # 0.0 hump here, which is exactly the desired screening semantics: with
+    # no kinetic data, the "energetic span" collapses to a purely
+    # thermodynamic climb between state energies (U_L is unaffected -- it
+    # only ever depends on node energies, not barriers).
     edge_barrier = {(u, v): d.get("barrier", 0.0) for u, v, d in g.edges(data=True)}
 
     # U_L: full-DAG -- every electrochemical step reachable from root, not
@@ -682,12 +709,19 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
         "pathway": results.pathway,
         "nodes": {k: v.as_dict() for k, v in results.node_energies.items()},
         "edges": [
-            {"name": e["name"], "reactant": e["reactant"], "product": e["product"],
-             "barrier": e["barrier"].as_dict(), "delta_e": e["delta_e"].as_dict()}
+            {
+                "name": e["name"], "reactant": e["reactant"], "product": e["product"],
+                # SCREENING mode: no "barrier" key on the edge at all -- see
+                # SearchConfig.screening / run_one_seed / aggregate_partials.
+                **({"barrier": e["barrier"].as_dict()} if "barrier" in e else {}),
+                "delta_e": e["delta_e"].as_dict(),
+            }
             for e in results.edges
         ],
         "warnings": results.warnings,
     }
+    if cfg.search.screening:
+        summary["screening"] = True
     if che is not None:
         # U_L, U_opt, span_at_UL, span_at_Uopt, span_target_at_Uopt, P_side, T
         summary.update(che)

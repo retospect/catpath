@@ -486,7 +486,9 @@ class PathwayHandler(Handler):
         r = artifact["results_json"]
         n_nodes = len(r["nodes"])
         n_edges = len(r["edges"])
-        low = sum(1 for e in r["edges"] if e["barrier"].get("low_confidence"))
+        # SCREENING-mode edges carry no "barrier" key at all (see
+        # SearchConfig.screening) -- `.get("barrier", {})` skips them cleanly.
+        low = sum(1 for e in r["edges"] if e.get("barrier", {}).get("low_confidence"))
         warns = len(artifact["warnings"])
         return (
             f"{verb} pathway '{slug}': {n_nodes} states, {n_edges} steps "
