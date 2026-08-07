@@ -16,6 +16,17 @@ adatom (O* or H*) is carried in the reactant.  **Supply** links (``+O*`` / ``+H*
 bridge states of different stoichiometry and carry no barrier - they only wire
 the graph together.  Adding more branches (NH -> NH2 -> NH3, OH -> H2O, ...) is
 just more ``StepSpec``/link entries.
+
+The ``ammonia`` network additionally comes in two **templates** (``kind="ammonia"``,
+``template=`` on :func:`build_network`):
+
+* ``"parked"`` (default) - after dissociation (``NO -> N+O``), whichever
+  fragment is NOT being hydrogenated is approximated as parking off to a
+  reservoir instantly (``N+O -> N+H`` drops the O, ``N+O -> O+H`` drops the
+  N) -- a bookkeeping shortcut, not a modeled intermediate.
+* ``"coadsorbed"`` - the verify tier that removes that approximation: both
+  fragments stay in-cell (``N+O+H``, ``NH+O+H``, ...) until a product
+  (H2O or NH3) actually desorbs.  See :func:`build_coadsorbed_ammonia_network`.
 """
 
 from __future__ import annotations
@@ -61,6 +72,13 @@ class Network:
     slab_cfg: SlabConfig
     steps: list[StepSpec] = field(default_factory=list)
     links: list[tuple[str, str]] = field(default_factory=list)  # supply edges
+    #: States that appear only as a link endpoint -- never a StepSpec
+    #: reactant/product (e.g. the ``coadsorbed`` template's bare "N"/"O"
+    #: landing spots after a desorption link). ``states()`` merges these in;
+    #: ``pipeline.run_one_seed`` gives each a standalone relax (no partner,
+    #: no NEB -- a link never carries a barrier) so it still gets a real
+    #: energy and becomes a proper graph node.
+    extra_states: list[StateSpec] = field(default_factory=list)
     #: An externally-prepared slab to score *instead of* building one from
     #: ``slab_cfg`` (the precis ``structure`` seam — the caller owns the
     #: geometry: alloy / adatom / facet / constraints). ``None`` = build from
@@ -96,6 +114,8 @@ class Network:
         for st in self.steps:
             out.setdefault(st.reactant.name, st.reactant)
             out.setdefault(st.product.name, st.product)
+        for st in self.extra_states:
+            out.setdefault(st.name, st)
         return out
 
     def order(self) -> list[str]:
@@ -302,35 +322,292 @@ def _H2O() -> StateSpec:
     ])
 
 
+def _ammonia_shared() -> tuple[list[StepSpec], list[tuple[str, str]]]:
+    """The part of the ammonia network identical between the ``"parked"`` and
+    ``"coadsorbed"`` templates: dissociation, the site isomer, the associative
+    fork (``NO+H -> HNO | NOH``), the single-species N-hydrogenation chain
+    (``N+H -> NH -> NH+H -> NH2 -> NH2+H -> NH3``), and the single-species
+    O -> water chain (``O+H -> OH -> OH+H -> H2O``). Shared by reference (one
+    definition) so the two templates never duplicate-drift.
+
+    NOT included: the two ``N+O -> {N+H, O+H}`` **parking** links -- those are
+    exactly the fragment-parking approximation the templates disagree on; each
+    builder supplies its own continuation from ``N+O``.
+    """
+    steps = [
+        StepSpec("NO->N+O", _NO(), _N_O()),        # dissociation
+        StepSpec("NO->NO@top", _NO(), _NO_top()),  # site isomer (diffusion)
+        StepSpec("N+H->NH", _N_H(), _NH()),        # N hydrogenation chain
+        StepSpec("NH+H->NH2", _NH_H(), _NH2()),
+        StepSpec("NH2+H->NH3", _NH2_H(), _NH3()),
+        StepSpec("NO+H->HNO", _NO_H(), _HNO()),    # associative fork
+        StepSpec("NO+H->NOH", _NO_H(), _NOH()),
+        StepSpec("O+H->OH", _O_H(), _OH()),        # O -> water byproduct
+        StepSpec("OH+H->H2O", _OH_H(), _H2O()),
+    ]
+    links = [
+        ("NO", "NO+H"),      # +H*
+        ("NH", "NH+H"),      # +H*
+        ("NH2", "NH2+H"),    # +H*
+        ("OH", "OH+H"),      # +H*
+    ]
+    return steps, links
+
+
 def build_ammonia_network(slab_cfg: SlabConfig) -> Network:
-    """NO reduction to ammonia, rooted at adsorbed NO.
+    """NO reduction to ammonia, rooted at adsorbed NO (the ``"parked"`` template).
 
         dissociation:   NO -> N + O
         hydrogenation:  N -(+H*)-> N+H -> NH -(+H*)-> NH+H -> NH2 -(+H*)-> NH2+H -> NH3
         associative:    NO -(+H*)-> NO+H -> HNO   (fork)
                                     NO+H -> NOH
+
+    After dissociation, whichever fragment is not being hydrogenated is
+    approximated as parking off to a reservoir instantly (``N+O -> N+H``
+    drops the O, ``N+O -> O+H`` drops the N) -- see
+    :func:`build_coadsorbed_ammonia_network` for the verify tier that removes
+    this approximation.
     """
+    steps, links = _ammonia_shared()
     return Network(
         slab_cfg,
-        steps=[
-            StepSpec("NO->N+O", _NO(), _N_O()),        # dissociation
-            StepSpec("NO->NO@top", _NO(), _NO_top()),  # site isomer (diffusion)
-            StepSpec("N+H->NH", _N_H(), _NH()),        # N hydrogenation chain
-            StepSpec("NH+H->NH2", _NH_H(), _NH2()),
-            StepSpec("NH2+H->NH3", _NH2_H(), _NH3()),
-            StepSpec("NO+H->HNO", _NO_H(), _HNO()),    # associative fork
-            StepSpec("NO+H->NOH", _NO_H(), _NOH()),
-            StepSpec("O+H->OH", _O_H(), _OH()),        # O -> water byproduct
-            StepSpec("OH+H->H2O", _OH_H(), _H2O()),
-        ],
+        steps=steps,
         links=[
-            ("NO", "NO+H"),      # +H*
-            ("N+O", "N+H"),      # N branch: O* to reservoir, +H*
-            ("N+O", "O+H"),      # O branch: N* to reservoir, +H*
-            ("NH", "NH+H"),      # +H*
-            ("NH2", "NH2+H"),    # +H*
-            ("OH", "OH+H"),      # +H*
+            *links,
+            ("N+O", "N+H"),      # N branch: O* to reservoir, +H* (PARKING)
+            ("N+O", "O+H"),      # O branch: N* to reservoir, +H* (PARKING)
         ],
+    )
+
+
+# --- coadsorbed template: the dissociative branch without fragment parking --
+
+def _fork(reactant_specs: list[dict], moves: dict[int, dict]) -> list[dict]:
+    """Copy ``reactant_specs``, repositioning the atom(s) at ``moves`` (index
+    -> partial spec overrides) -- the "chemical fork" transformation (a
+    free/newly-supplied H binds to one fragment or the other). Every other
+    atom's spec is copied unchanged and every index keeps its symbol, so a
+    step built from ``(reactant_specs, _fork(reactant_specs, ...))`` is always
+    atom-for-atom order-matched -- the invariant NEB interpolation needs (see
+    the :mod:`catpath.structures` module docstring).
+    """
+    out = [dict(s) for s in reactant_specs]
+    for idx, new_pos in moves.items():
+        out[idx] = {**out[idx], **new_pos}
+    return out
+
+
+# free/unbonded H, awaiting a fork (bonds to whichever fragment "wins")
+_H_FREE = {"symbol": "H", "site": "bridge", "height": 1.1, "dx": -2.2, "dy": 1.3}
+
+
+def _N_O_H() -> StateSpec:  # N* + O* + H* -- all three still separate
+    specs = [
+        {"symbol": "N", "site": "fcc", "height": 1.6, "dx": 0.0, "dy": 0.0},
+        {"symbol": "O", "site": "hcp", "height": 1.6, "dx": 2.6, "dy": 0.0},
+        dict(_H_FREE),
+    ]
+    return StateSpec("N+O+H", "N.O.H", specs)
+
+
+def _NH_O() -> StateSpec:  # H bonds N: NH* + O* (fork of N+O+H)
+    specs = _fork(_N_O_H().specs, {2: {"site": "fcc", "height": 2.8, "dx": 0.0, "dy": 0.0}})
+    return StateSpec("NH+O", "NH.O", specs)
+
+
+def _N_OH() -> StateSpec:  # H bonds O: N* + OH* (fork of N+O+H)
+    specs = _fork(_N_O_H().specs, {
+        1: {"height": 1.9},
+        2: {"site": "hcp", "height": 2.9, "dx": 2.6, "dy": 0.0},
+    })
+    return StateSpec("N+OH", "N.OH", specs)
+
+
+def _NH_O_H() -> StateSpec:  # NH* + O* + H* (+H* supply onto NH+O)
+    specs = [*_NH_O().specs, dict(_H_FREE)]
+    return StateSpec("NH+O+H", "NH.O.H", specs)
+
+
+def _NH2_O() -> StateSpec:  # new H also binds N -> NH2* + O* (fork of NH+O+H)
+    specs = _fork(_NH_O_H().specs, {
+        0: {"height": 1.8},
+        2: {"height": 2.8, "dx": 0.9, "dy": 0.5},
+        3: {"height": 2.8, "dx": -0.9, "dy": 0.5},
+    })
+    return StateSpec("NH2+O", "NH2.O", specs)
+
+
+def _NH_OH_from_NH_O_H() -> StateSpec:  # new H binds O -> NH* + OH* (fork of NH+O+H)
+    specs = _fork(_NH_O_H().specs, {
+        1: {"height": 1.9},
+        3: {"site": "hcp", "height": 2.9, "dx": 2.6, "dy": 0.0},
+    })
+    return StateSpec("NH+OH", "NH.OH", specs)
+
+
+def _N_OH_H() -> StateSpec:  # N* + OH* + H* (+H* supply onto N+OH)
+    specs = [*_N_OH().specs, dict(_H_FREE)]
+    return StateSpec("N+OH+H", "N.OH.H", specs)
+
+
+def _NH_OH_from_N_OH_H() -> StateSpec:  # new H binds N -> NH* + OH* (fork of N+OH+H)
+    specs = _fork(_N_OH_H().specs, {
+        0: {"height": 1.7},
+        3: {"site": "fcc", "height": 2.8, "dx": 0.0, "dy": 0.0},
+    })
+    return StateSpec("NH+OH", "NH.OH", specs)
+
+
+def _N_H2O() -> StateSpec:  # new H completes water -> N* + H2O* (fork of N+OH+H)
+    specs = _fork(_N_OH_H().specs, {
+        1: {"height": 2.2},
+        2: {"height": 2.9, "dx": 3.5, "dy": 0.3},
+        3: {"site": "hcp", "height": 2.9, "dx": 1.7, "dy": 0.3},
+    })
+    return StateSpec("N+H2O", "N.H2O", specs)
+
+
+def _NH2_O_H() -> StateSpec:  # NH2* + O* + H* (+H* supply onto NH2+O)
+    specs = [*_NH2_O().specs, dict(_H_FREE)]
+    return StateSpec("NH2+O+H", "NH2.O.H", specs)
+
+
+def _NH3_O() -> StateSpec:  # new H completes NH3 -> NH3* + O* (fork of NH2+O+H)
+    specs = _fork(_NH2_O_H().specs, {
+        0: {"height": 2.0},
+        2: {"height": 2.9, "dx": 1.0, "dy": 0.0},
+        3: {"height": 2.9, "dx": -0.5, "dy": 0.87},
+        4: {"site": "fcc", "height": 2.9, "dx": -0.5, "dy": -0.87},
+    })
+    return StateSpec("NH3+O", "NH3.O", specs)
+
+
+def _NH2_OH_from_NH2_O_H() -> StateSpec:  # new H binds O -> NH2* + OH* (fork of NH2+O+H)
+    specs = _fork(_NH2_O_H().specs, {
+        1: {"height": 1.9},
+        4: {"site": "hcp", "height": 2.9, "dx": 2.6, "dy": 0.0},
+    })
+    return StateSpec("NH2+OH", "NH2.OH", specs)
+
+
+def _NH_OH_H() -> StateSpec:  # NH* + OH* + H* (+H* supply onto NH+OH)
+    specs = [*_NH_OH_from_NH_O_H().specs, dict(_H_FREE)]
+    return StateSpec("NH+OH+H", "NH.OH.H", specs)
+
+
+def _NH2_OH_from_NH_OH_H() -> StateSpec:  # new H binds N -> NH2* + OH* (fork of NH+OH+H)
+    specs = _fork(_NH_OH_H().specs, {
+        0: {"height": 1.8},
+        2: {"height": 2.8, "dx": 0.9, "dy": 0.5},
+        4: {"site": "fcc", "height": 2.8, "dx": -0.9, "dy": 0.5},
+    })
+    return StateSpec("NH2+OH", "NH2.OH", specs)
+
+
+def _NH_H2O() -> StateSpec:  # new H completes water -> NH* + H2O* (fork of NH+OH+H)
+    specs = _fork(_NH_OH_H().specs, {
+        1: {"height": 2.2},
+        3: {"height": 2.9, "dx": 3.5, "dy": 0.3},
+        4: {"site": "hcp", "height": 2.9, "dx": 1.7, "dy": 0.3},
+    })
+    return StateSpec("NH+H2O", "NH.H2O", specs)
+
+
+def _NH2_OH_H() -> StateSpec:  # NH2* + OH* + H* (+H* supply onto NH2+OH)
+    specs = [*_NH2_OH_from_NH2_O_H().specs, dict(_H_FREE)]
+    return StateSpec("NH2+OH+H", "NH2.OH.H", specs)
+
+
+def _NH3_OH() -> StateSpec:  # new H completes NH3 -> NH3* + OH* (fork of NH2+OH+H)
+    specs = _fork(_NH2_OH_H().specs, {
+        0: {"height": 2.0},
+        2: {"height": 2.9, "dx": 1.0, "dy": 0.0},
+        3: {"height": 2.9, "dx": -0.5, "dy": 0.87},
+        5: {"site": "fcc", "height": 2.9, "dx": -0.5, "dy": -0.87},
+    })
+    return StateSpec("NH3+OH", "NH3.OH", specs)
+
+
+def _NH2_H2O() -> StateSpec:  # new H completes water -> NH2* + H2O* (fork of NH2+OH+H)
+    specs = _fork(_NH2_OH_H().specs, {
+        1: {"height": 2.2},
+        4: {"height": 2.9, "dx": 3.5, "dy": 0.3},
+        5: {"site": "hcp", "height": 2.9, "dx": 1.7, "dy": 0.3},
+    })
+    return StateSpec("NH2+H2O", "NH2.H2O", specs)
+
+
+def _N_bare() -> StateSpec:  # N*, alone -- the landing spot once H2O has desorbed
+    return StateSpec("N", "N", [{"symbol": "N", "site": "fcc", "height": 1.6}])
+
+
+def _O_bare() -> StateSpec:  # O*, alone -- the landing spot once NH3 has desorbed
+    return StateSpec("O", "O", [{"symbol": "O", "site": "fcc", "height": 1.5}])
+
+
+def build_coadsorbed_ammonia_network(slab_cfg: SlabConfig) -> Network:
+    """NO reduction to ammonia, ``"coadsorbed"`` (verify) template: the
+    fragment-parking approximation is removed -- after dissociation, both N*
+    and O* stay in-cell together, each further H* supply forks on WHICH
+    fragment takes it, until a product (H2O or NH3) actually desorbs::
+
+        N+O -(+H*)-> N+O+H -c-> NH+O | N+OH
+        NH+O -(+H*)-> NH+O+H -c-> NH2+O | NH+OH
+        N+OH -(+H*)-> N+OH+H -c-> NH+OH | N+H2O
+        NH+OH -(+H*)-> NH+OH+H -c-> NH2+OH | NH+H2O
+        NH2+O -(+H*)-> NH2+O+H -c-> NH3+O | NH2+OH
+        NH2+OH -(+H*)-> NH2+OH+H -c-> NH3+OH | NH2+H2O
+
+    H2O desorbs as soon as it forms (``N+H2O -> N``, ``NH+H2O -> NH``,
+    ``NH2+H2O -> NH2``), landing on the shared single-species N-branch, which
+    continues to NH3 exactly as in the parked template; ``NH3+O``/``NH3+OH``
+    desorb NH3, landing on ``O``/``OH``, which continue hydrogenating to
+    water via the shared single-species O-branch. Every desorption/re-entry
+    link is barrier-less bookkeeping (no NEB), same convention as the
+    existing ``+O*``/``+H*`` supply links -- see :mod:`catpath.pipeline`
+    ``_gas_energy`` for why a genuine desorption ΔE is NOT wired in here (a
+    known, reported gap; every such edge stays at the same "no fabricated
+    number" 0.0 the rest of the supply-link convention already uses).
+
+    The associative fork and everything before scission are shared byte-for-byte
+    with :func:`build_ammonia_network` (see :func:`_ammonia_shared`) -- only the
+    dissociative branch's continuation differs.
+    """
+    shared_steps, shared_links = _ammonia_shared()
+    coadsorbed_steps = [
+        StepSpec("N+O+H->NH+O", _N_O_H(), _NH_O()),
+        StepSpec("N+O+H->N+OH", _N_O_H(), _N_OH()),
+        StepSpec("NH+O+H->NH2+O", _NH_O_H(), _NH2_O()),
+        StepSpec("NH+O+H->NH+OH", _NH_O_H(), _NH_OH_from_NH_O_H()),
+        StepSpec("N+OH+H->NH+OH", _N_OH_H(), _NH_OH_from_N_OH_H()),
+        StepSpec("N+OH+H->N+H2O", _N_OH_H(), _N_H2O()),
+        StepSpec("NH2+O+H->NH3+O", _NH2_O_H(), _NH3_O()),
+        StepSpec("NH2+O+H->NH2+OH", _NH2_O_H(), _NH2_OH_from_NH2_O_H()),
+        StepSpec("NH+OH+H->NH2+OH", _NH_OH_H(), _NH2_OH_from_NH_OH_H()),
+        StepSpec("NH+OH+H->NH+H2O", _NH_OH_H(), _NH_H2O()),
+        StepSpec("NH2+OH+H->NH3+OH", _NH2_OH_H(), _NH3_OH()),
+        StepSpec("NH2+OH+H->NH2+H2O", _NH2_OH_H(), _NH2_H2O()),
+    ]
+    coadsorbed_links = [
+        ("N+O", "N+O+H"),        # +H* supply, fork point 1
+        ("NH+O", "NH+O+H"),      # +H* supply, fork point 2
+        ("N+OH", "N+OH+H"),      # +H* supply, fork point 3
+        ("NH2+O", "NH2+O+H"),    # +H* supply, fork point 4
+        ("NH+OH", "NH+OH+H"),    # +H* supply, fork point 5
+        ("NH2+OH", "NH2+OH+H"),  # +H* supply, fork point 6
+        ("N+H2O", "N"),          # H2O desorbs -> lands on the shared N-branch
+        ("NH+H2O", "NH"),
+        ("NH2+H2O", "NH2"),
+        ("NH3+O", "O"),          # NH3 desorbs -> lands on the shared O-branch
+        ("NH3+OH", "OH"),
+        ("N", "N+H"),            # bare N* rejoins the shared N-branch, +H*
+        ("O", "O+H"),            # bare O* rejoins the shared O-branch, +H*
+    ]
+    return Network(
+        slab_cfg,
+        steps=[*shared_steps, *coadsorbed_steps],
+        links=[*shared_links, *coadsorbed_links],
+        extra_states=[_N_bare(), _O_bare()],
     )
 
 
@@ -380,29 +657,44 @@ def filter_by_reagents(net: Network, reagents: list[str]) -> Network:
     steps = [s for s in net.steps
              if s.reactant.name in reachable and s.product.name in reachable]
     links = [(a, b) for a, b in kept_links if a in reachable and b in reachable]
-    return Network(net.slab_cfg, steps=steps, links=links)
+    extra_states = [st for st in net.extra_states if st.name in reachable]
+    return Network(net.slab_cfg, steps=steps, links=links, extra_states=extra_states)
 
 
 def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
                   reagents: list[str] | None = None,
                   substrate: str = "NO", target: str | None = None,
-                  max_extra: int = 4, max_states: int = 600) -> Network:
+                  max_extra: int = 4, max_states: int = 600,
+                  template: str = "parked") -> Network:
     """Build a reaction network.
 
     ``kind="auto"`` autodetects the intermediates from ``substrate`` -> ``target``
     (rule-guided; see :mod:`catpath.explore`), bounded by ``max_extra`` (reagent
     atom budget) and ``max_states``; the curated template kinds ignore
     ``substrate``/``target``/``max_*`` and are filtered by ``reagents`` as before.
+
+    ``template`` selects between the two ``kind="ammonia"`` variants:
+    ``"parked"`` (default -- the fragment-parking approximation, unchanged
+    behavior) or ``"coadsorbed"`` (the verify tier that removes it -- see
+    :func:`build_coadsorbed_ammonia_network`). Meaningless for any other
+    ``kind`` -- ``"coadsorbed"`` there is a ``ValueError``.
     """
+    if template not in ("parked", "coadsorbed"):
+        raise ValueError(f"unknown template {template!r}; choose 'parked' or 'coadsorbed'")
     if kind == "auto":
+        if template != "parked":
+            raise ValueError("template='coadsorbed' only applies to kind='ammonia'")
         from .explore import build_auto_network
         return build_auto_network(slab_cfg, substrate=substrate,
                                   target=target or substrate, reagents=reagents,
                                   max_extra=max_extra, max_states=max_states)
+    if template == "coadsorbed" and kind != "ammonia":
+        raise ValueError("template='coadsorbed' only applies to kind='ammonia'")
     builders = {
         "oxidation": build_oxidation_network,
         "branching": build_branching_network,
-        "ammonia": build_ammonia_network,
+        "ammonia": build_coadsorbed_ammonia_network if template == "coadsorbed"
+                   else build_ammonia_network,
     }
     if kind not in builders:
         raise ValueError(

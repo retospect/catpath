@@ -44,6 +44,7 @@ def network_topology(config: dict[str, Any]) -> dict[str, Any]:
     net = build_network(
         cfg.slab, cfg.network, cfg.reagents, cfg.substrate, cfg.target,
         max_extra=cfg.auto.max_extra, max_states=cfg.auto.max_states,
+        template=cfg.template,
     )
     states = net.states()
     order = net.order()
@@ -117,6 +118,7 @@ def _summary(cfg: Config, results: Results) -> dict[str, Any]:
         "n_samples": max(1, len(results.models)) * len(cfg.search.seeds),
         "relaxed_lattice_A": results.lattice,
         "energy_reference": f"relative to substrate state '{results.pathway[0]}'",
+        "template": cfg.template,
         "pathway": results.pathway,
         "nodes": {k: v.as_dict() for k, v in results.node_energies.items()},
         "edges": [

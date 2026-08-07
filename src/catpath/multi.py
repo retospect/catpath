@@ -48,6 +48,7 @@ def run_multi(base: Config, log=print) -> MultiResult:
         cfg.substrate = spec.substrate
         cfg.target = spec.target
         cfg.network = spec.network
+        cfg.template = spec.template
         cfg.reagents = spec.reagents
         cfg.substrates = [spec.substrate]      # single run; no recursion
         cfg.name = spec.name or f"{base.name}_{spec.substrate}_{spec.network}"

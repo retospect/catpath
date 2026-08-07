@@ -56,7 +56,7 @@ def _build_net(cfg: Config, log=lambda *a, **k: None) -> Network:
     """
     net = build_network(cfg.slab, cfg.network, cfg.reagents, cfg.substrate,
                         cfg.target, max_extra=cfg.auto.max_extra,
-                        max_states=cfg.auto.max_states)
+                        max_states=cfg.auto.max_states, template=cfg.template)
     # Injected slab (the precis `structure` seam) travels on cfg as a runtime
     # side-channel — not a dataclass field, so it never leaks into
     # to_dict/snapshot/content_key. Every build path funnels through here, so
@@ -328,6 +328,8 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
     all_syms: set[str] = set()
     for st in net.steps:
         all_syms |= symbols_of(st.reactant.build(slab))
+    for st in net.extra_states:
+        all_syms |= symbols_of(st.build(slab))
     check_supported(all_syms, cfg.mlip)
 
     states: dict[str, float] = {}
@@ -431,6 +433,24 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
         except Exception as e:  # abandon this seed's edge, keep going
             warnings.append(f"{step.name} seed={seed} NEB failed: {e}")
         steps[step.name] = entry
+
+    # extra states (`Network.extra_states`): declared as a link endpoint only,
+    # never a StepSpec reactant/product (e.g. the coadsorbed template's bare
+    # "N"/"O" landing spots) -- give each a standalone relax so it still gets
+    # a real energy and becomes a proper graph node. No partner, so no NEB /
+    # barrier (a link never carries one, same as every other supply edge).
+    for st in net.extra_states:
+        log(f"[{st.name}] seed={seed}: relaxing (standalone, no step)")
+        res, geo = _relax_state(st, slab, n_slab, cfg, seed)
+        states[st.name] = min(states.get(st.name, np.inf), res.energy)
+        if collect is not None:
+            prev = collect.get(st.name)
+            if prev is None or res.energy < prev[0]:
+                collect[st.name] = (res.energy, res.atoms.copy())
+        if not geo.ok:
+            warnings.append(f"{st.name} seed={seed} geometry: {'; '.join(geo.reasons)}")
+        if not res.converged:
+            warnings.append(f"{st.name} seed={seed} not converged")
 
     return {"seed": seed, "states": states, "steps": steps, "warnings": warnings}
 
@@ -706,6 +726,7 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
         "n_samples": max(1, len(results.models)) * len(cfg.search.seeds),
         "relaxed_lattice_A": results.lattice,
         "energy_reference": f"relative to substrate state '{results.pathway[0]}'",
+        "template": cfg.template,
         "pathway": results.pathway,
         "nodes": {k: v.as_dict() for k, v in results.node_energies.items()},
         "edges": [

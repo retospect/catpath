@@ -156,6 +156,7 @@ class SubstrateSpec:
     substrate: str
     target: str = ""
     network: str = "ammonia"
+    template: str = "parked"  # kind="ammonia" only -- see Config.template
     reagents: list[str] | None = None
     name: str = ""  # optional row label / run-folder suffix
 
@@ -170,6 +171,12 @@ class Config:
     substrate: str = "NO"  # starting adsorbate label
     target: str = "NH3"  # ending adsorbate label
     network: str = "ammonia"  # ammonia | branching | oxidation
+    # kind="ammonia" only: "parked" (default, fragment-parking approximation,
+    # unchanged behavior) | "coadsorbed" (verify tier -- both dissociation
+    # fragments stay in-cell until a product desorbs; see
+    # network.build_coadsorbed_ammonia_network). Ignored/invalid for any
+    # other network kind.
+    template: str = "parked"
     # which reagent adatoms are available (filters the network branches);
     # None = use the full template (back-compat), [] = reagent-free steps only.
     reagents: list[str] | None = None
@@ -211,11 +218,13 @@ class Config:
                 d = dict(s)
                 d.setdefault("target", self.target)
                 d.setdefault("network", self.network)
+                d.setdefault("template", self.template)
                 d.setdefault("reagents", self.reagents)
                 specs.append(SubstrateSpec(**d))
             else:
                 specs.append(SubstrateSpec(substrate=s, target=self.target,
                                            network=self.network,
+                                           template=self.template,
                                            reagents=self.reagents))
         return specs
 
