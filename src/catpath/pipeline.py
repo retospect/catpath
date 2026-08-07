@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 from ase.constraints import Hookean
 
+from . import electrochem
 from .calculators import check_supported, make_calculator, resolve_backend
 from .config import Config
 from .graph import build_graph, to_csv, to_json
@@ -450,6 +451,44 @@ def run(cfg: Config, log=print) -> Results:
     return results
 
 
+def _apply_electrochemistry(g, cfg: Config, results: Results, log=print) -> dict | None:
+    """CHE post-processing (docs/proposals/pathway-potential-lever.md, slice 1):
+    stamp ``n_H`` (relative to the root state -- see :func:`electrochem.n_H_rel`)
+    onto every node of ``g`` in place, and return the ``U_L``/``U_opt``/
+    ``span_at_UL``/``span_at_Uopt`` scalar bundle for the substrate->target
+    pathway. Pure post-processing over the energies already in ``g`` -- no new
+    relax/NEB calls. ``None`` if there is no electrochemistry config, or no
+    root->target path to compute a pathway span/limiting-potential over.
+    """
+    ec = cfg.electrochemistry
+    if ec is None or not results.pathway:
+        return None
+    root = results.pathway[0]
+    nodes = set(g.nodes())
+    target = cfg.target if cfg.target in nodes else results.pathway[-1]
+
+    for n, data in g.nodes(data=True):
+        data["n_H"] = electrochem.n_H_rel(n, root)
+
+    edges = list(g.edges())
+    path = electrochem.reaction_path(edges, root, target)
+    if len(path) < 2:
+        log(f"electrochemistry: no root->target path ({root} -> {target}); "
+            "skipping U_L/span")
+        return None
+
+    node_energy0 = {n: d["rel_energy"] for n, d in g.nodes(data=True)}
+    edge_barrier = {(u, v): d.get("barrier", 0.0) for u, v, d in g.edges(data=True)}
+    path_edges = list(zip(path, path[1:]))
+
+    u_l = electrochem.limiting_potential(node_energy0, path_edges, root)
+    u_opt, span_opt = electrochem.optimal_span_u(
+        path, node_energy0, edge_barrier, root, window=ec.U_window)
+    span_ul = (electrochem.energetic_span_u(path, node_energy0, edge_barrier, root, u_l)
+              if u_l is not None else None)
+    return {"U_L": u_l, "U_opt": u_opt, "span_at_UL": span_ul, "span_at_Uopt": span_opt}
+
+
 def write_outputs(cfg: Config, results: Results, log=print) -> Path:
     outdir = Path(cfg.outdir) / cfg.name
     outdir.mkdir(parents=True, exist_ok=True)
@@ -466,6 +505,7 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
                           "kind": "supply"})
 
     g = build_graph(results.node_energies, edges, energy_ref=ref)
+    che = _apply_electrochemistry(g, cfg, results, log=log)  # stamps n_H onto g's nodes
     to_json(g, outdir / "graph.json")
     to_csv(g, outdir / "nodes.csv", outdir / "edges.csv")
     title = f"{cfg.substrate} -> {cfg.target} on {cfg.slab.element}"
@@ -524,6 +564,8 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
         ],
         "warnings": results.warnings,
     }
+    if che is not None:
+        summary.update(che)  # U_L, U_opt, span_at_UL, span_at_Uopt (additive)
     (outdir / "results.json").write_text(json.dumps(summary, indent=2))
     log(f"wrote outputs to {outdir}")
     return outdir

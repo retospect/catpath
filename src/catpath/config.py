@@ -110,6 +110,33 @@ class AutoConfig:
 
 
 @dataclass
+class ElectrochemistryConfig:
+    """Computational hydrogen electrode (CHE) post-processing -- pure
+    post-processing over energies already computed, no new relax/NEB calls.
+    See ``docs/proposals/pathway-potential-lever.md`` (slice 1) in the
+    precis-mcp repo.
+
+    ``U_vs_RHE``: the operating potential (V vs RHE), or the literal string
+    ``"optimal"``. catpath always computes both the limiting potential
+    (``U_L``) and the span-minimizing potential (``U_opt``, plus its span) --
+    they are closed-form and cheap either way; ``U_vs_RHE`` is provenance
+    (round-tripped via ``Config.snapshot``) for downstream (precis/explorer)
+    to pick a default display potential from.
+    ``pH``: optional; only matters for RHE<->SHE display conversion and any
+    (currently dormant) decoupled-proton step -- PCET (H-supply) steps are
+    pH-independent on the RHE scale.
+    ``T``: temperature (K), default 298.15 (standard ambient).
+    ``U_window``: optional ``(lo, hi)`` bound (V) for the U_opt search; ``None``
+    searches the unbounded closed form.
+    """
+
+    U_vs_RHE: float | str = 0.0
+    pH: float | None = None
+    T: float = 298.15
+    U_window: tuple[float, float] | None = None
+
+
+@dataclass
 class SubstrateSpec:
     """One (substrate -> target) network to run in a multi-substrate job."""
 
@@ -140,6 +167,10 @@ class Config:
     render: RenderConfig = field(default_factory=RenderConfig)
     auto: AutoConfig = field(default_factory=AutoConfig)  # network: auto controls
     outdir: str = "runs"
+    # present -> pipeline.write_outputs stamps n_H_rel per node and adds
+    # U_L/U_opt/span_at_UL/span_at_Uopt to results.json (slice 1 of the
+    # potential-lever proposal); absent (default) -> no CHE post-processing.
+    electrochemistry: ElectrochemistryConfig | None = None
 
     def __post_init__(self) -> None:
         self.slab.size = tuple(self.slab.size)  # type: ignore[assignment]
@@ -192,7 +223,15 @@ class Config:
         search = SearchConfig(**search_data)
         # normalise tuple fields that YAML gives as lists
         slab.size = tuple(slab.size)  # type: ignore[assignment]
-        cfg = cls(slab=slab, mlip=mlip, search=search, render=render, auto=auto, **data)
+        electrochemistry = None
+        ec_data = data.pop("electrochemistry", None)
+        if ec_data is not None:
+            ec_data = dict(ec_data)
+            if ec_data.get("U_window") is not None:
+                ec_data["U_window"] = tuple(ec_data["U_window"])  # type: ignore[assignment]
+            electrochemistry = ElectrochemistryConfig(**ec_data)
+        cfg = cls(slab=slab, mlip=mlip, search=search, render=render, auto=auto,
+                  electrochemistry=electrochemistry, **data)
         if not cfg.substrates:
             cfg.substrates = [cfg.substrate]
         return cfg
