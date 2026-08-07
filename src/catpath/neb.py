@@ -6,7 +6,7 @@ fallback (``linear_barrier``) for when NEB is overkill or fails to converge.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from ase import Atoms
@@ -24,6 +24,11 @@ class BarrierResult:
     converged: bool
     method: str
     images_energy: list[float]
+    # Final relaxed band (endpoints + interior images), reactant first. Only
+    # populated by `neb_barrier` (a real NEB); `linear_barrier` has no band to
+    # report and leaves this empty. Lets a caller run its own per-image
+    # geometry checks (e.g. mid-band detachment) on the band actually used.
+    images: list[Atoms] = field(default_factory=list)
 
 
 def _energies(images: list[Atoms]) -> list[float]:
@@ -33,8 +38,8 @@ def _energies(images: list[Atoms]) -> list[float]:
 def _neb_attempt(
     reactant: Atoms, product: Atoms, make_calc,
     n_images: int, fmax: float, max_steps: int, climb: bool,
-) -> tuple[list[float], bool]:
-    """One climbing-image NEB run -> (image energies, converged)."""
+) -> tuple[list[float], bool, list[Atoms]]:
+    """One climbing-image NEB run -> (image energies, converged, band images)."""
     images = [reactant.copy()]
     images += [reactant.copy() for _ in range(n_images)]
     images += [product.copy()]
@@ -54,7 +59,7 @@ def _neb_attempt(
     neb.interpolate(method="idpp")
     dyn = BFGS(neb, logfile=None)
     converged = bool(dyn.run(fmax=fmax, steps=max_steps))
-    return _energies(images), converged
+    return _energies(images), converged, images
 
 
 def neb_barrier(
@@ -80,10 +85,11 @@ def neb_barrier(
 
     ni, ms = n_images, max_steps
     es: list[float] = []
+    ims: list[Atoms] = []
     converged = False
     attempt = 0
     for attempt in range(1 + max(0, retries)):
-        es, converged = _neb_attempt(reactant, product, make_calc, ni, fmax, ms, climb)
+        es, converged, ims = _neb_attempt(reactant, product, make_calc, ni, fmax, ms, climb)
         if converged:
             break
         ni += max(2, ni // 2)  # ~1.5x denser band
@@ -95,7 +101,7 @@ def neb_barrier(
     return BarrierResult(
         e_reactant=e_r, e_product=e_p, e_ts=e_ts,
         barrier=e_ts - e_r, delta_e=e_p - e_r,
-        converged=converged, method=method, images_energy=es,
+        converged=converged, method=method, images_energy=es, images=ims,
     )
 
 

@@ -104,6 +104,31 @@ def _detached(geo) -> bool:
     return any("detached" in r for r in geo.reasons)
 
 
+def _mid_band_detachment(bar, n_slab: int) -> tuple[int, int, float] | None:
+    """Interior-image detachment check on a NEB band -- same criterion
+    (`geometry_ok`'s ``max_ads_height``) used for the endpoint bind pre-flight,
+    just applied to every image the band actually relaxed to, not only the
+    two endpoints. A barrier through a mid-band image where the adsorbate flew
+    off the slab is a barrier through a fictitious geometry.
+
+    Returns ``(image_index, n_images, height)`` (1-based, endpoints included in
+    the count) for the worst-detached interior image, or ``None`` if the whole
+    band stayed bound (or the caller/stub has no ``images`` to check).
+    """
+    images = getattr(bar, "images", None) or []
+    n = len(images)
+    if n < 3:  # need at least one interior image between the two endpoints
+        return None
+    worst: tuple[int, int, float] | None = None
+    for i, im in enumerate(images[1:-1], start=2):  # 1-based; skip both endpoints
+        geo = geometry_ok(im, n_slab)
+        if not _detached(geo):
+            continue
+        if worst is None or geo.adsorbate_height > worst[2]:
+            worst = (i, n, geo.adsorbate_height)
+    return worst
+
+
 def _tether_constraints(atoms, n_slab: int) -> list:
     """One Hookean per adsorbate atom, anchored to its nearest slab atom."""
     pos = atoms.get_positions()
@@ -355,10 +380,41 @@ def run_one_seed(cfg: Config, seed: int, log=print, collect: dict | None = None)
                 fmax=cfg.search.neb_fmax, max_steps=cfg.search.neb_max_steps,
                 retries=cfg.search.neb_retries,
             )
+            if not bar.converged and cfg.search.neb_auto_retry:
+                # one more attempt, steps only (band density / fmax untouched) --
+                # separate from `neb_retries` above, which is neb_barrier's own
+                # (denser-band) internal escalation.
+                retry_steps = cfg.search.neb_max_steps * 2
+                log(f"NEB {step.name} seed={seed}: not converged after "
+                    f"{cfg.search.neb_max_steps} steps — retrying with {retry_steps}")
+                try:
+                    retry_bar = neb_barrier(
+                        r_res.atoms, p_res.atoms,
+                        make_calc=lambda: make_calculator(cfg.mlip),
+                        n_images=cfg.search.neb_images,
+                        fmax=cfg.search.neb_fmax, max_steps=retry_steps,
+                        retries=0,
+                    )
+                except Exception as e:
+                    warnings.append(f"{step.name} seed={seed} NEB retry failed: {e}")
+                else:
+                    bar = retry_bar
+                    if bar.converged:
+                        warnings.append(
+                            f"{step.name} seed={seed} NEB converged on retry "
+                            f"(steps={retry_steps})")
             entry["barrier"] = bar.barrier
             entry["delta_e"] = bar.delta_e
             if not bar.converged:
                 warnings.append(f"{step.name} seed={seed} NEB not converged")
+
+            hit = _mid_band_detachment(bar, n_slab)
+            if hit is not None:
+                k, n_im, d = hit
+                entry["low_confidence"] = True
+                warnings.append(
+                    f"{step.name} seed={seed}: adsorbate detached mid-band "
+                    f"(image {k} of {n_im}, d={d:.2f} A) — barrier untrustworthy")
         except Exception as e:  # abandon this seed's edge, keep going
             warnings.append(f"{step.name} seed={seed} NEB failed: {e}")
         steps[step.name] = entry
@@ -383,6 +439,11 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
     step_bar: dict[str, list[float]] = {}
     step_de: dict[str, list[float]] = {}
     step_meta: dict[str, tuple[str, str]] = {}
+    # any seed/model flagging a step's barrier `low_confidence` (e.g. mid-band
+    # detachment, see `_mid_band_detachment`) taints the aggregated Estimate --
+    # a low-spread mean across seeds doesn't redeem a barrier through a
+    # fictitious geometry in even one of them.
+    step_low_conf: dict[str, bool] = {}
     models: set[str] = set()
 
     for p in partials:
@@ -397,13 +458,18 @@ def aggregate_partials(cfg: Config, partials: list[dict]) -> Results:
                 step_bar.setdefault(sname, []).append(s["barrier"])
             if s["delta_e"] is not None:
                 step_de.setdefault(sname, []).append(s["delta_e"])
+            if s.get("low_confidence"):
+                step_low_conf[sname] = True
 
     for name, vals in state_vals.items():
         results.node_energies[name] = aggregate(vals, cfg.search.energy_thresh)
     for sname, (r, pr) in step_meta.items():
+        barrier_est = aggregate(step_bar.get(sname, []), cfg.search.energy_thresh)
+        if step_low_conf.get(sname):
+            barrier_est.low_confidence = True
         results.edges.append({
             "name": sname, "reactant": r, "product": pr,
-            "barrier": aggregate(step_bar.get(sname, []), cfg.search.energy_thresh),
+            "barrier": barrier_est,
             "delta_e": aggregate(step_de.get(sname, []), cfg.search.energy_thresh),
         })
     results.models = sorted(models)

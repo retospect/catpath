@@ -87,6 +87,11 @@ class SearchConfig:
     neb_fmax: float = 0.1  # eV/A convergence on the NEB band
     neb_max_steps: int = 80
     neb_retries: int = 1  # on non-convergence, retry with a denser band + more steps
+    # separate from `neb_retries` above: on a still-non-converged NEB, run ONE more
+    # attempt with double the step budget only (same images/fmax) before giving up --
+    # see pipeline.run_one_seed. Opt-out for callers that want the raw first-attempt
+    # convergence flag reported as-is.
+    neb_auto_retry: bool = True
     seeds: list[int] = field(default_factory=lambda: [0, 1, 2])
     # gate the NEB on an endpoint binding pre-flight (see pipeline._relax_state_bound):
     # a desorbed endpoint gets a restrained-then-released reseat attempt before the
