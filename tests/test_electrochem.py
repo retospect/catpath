@@ -62,6 +62,27 @@ def test_electrochemical_steps_filters_by_n_H_increase():
     assert ec.electrochemical_steps(edges, root="NO") == [("NO", "NO+H")]
 
 
+def test_limiting_potential_full_dag_picks_up_an_off_target_path_step():
+    # A -(+H*, dG=0.1)-> A+H -(chemical)-> AB      [target path]
+    # A -(+H*, dG=0.5)-> X+H                        [off-target-path branch]
+    node_energy0 = {"A": 0.0, "A+H": 0.1, "AB": 0.05, "X+H": 0.5}
+    edges = [("A", "A+H"), ("A", "X+H"), ("A+H", "AB")]
+
+    target_path = ec.reaction_path(edges, "A", "AB")
+    assert target_path == ["A", "A+H", "AB"]
+    path_edges = list(zip(target_path, target_path[1:]))
+    u_l_path_only = ec.limiting_potential(node_energy0, path_edges, "A")
+    assert u_l_path_only == pytest.approx(-0.1)
+
+    # full-DAG U_L must also see the off-path A->X+H step (dG=0.5, the real
+    # constraint -- both branches must proceed for turnover).
+    reachable = ec.reachable_from(edges, "A")
+    reachable_edges = [(a, b) for a, b in edges if a in reachable]
+    u_l_dag = ec.limiting_potential(node_energy0, reachable_edges, "A")
+    assert u_l_dag == pytest.approx(-0.5)
+    assert u_l_dag < u_l_path_only
+
+
 # --- span-vs-U (hand-computable 3-state path) --------------------------
 #
 # N -(+H*, no barrier)-> N+H -(chemical, Ea=0.5)-> NH
@@ -154,6 +175,117 @@ def test_optimal_span_u_finds_crossings_between_disjoint_difference_terms():
     assert span_opt == pytest.approx(grid_min, abs=2e-3)
 
 
+# --- required leaves (root fragments must all end somewhere) ---------------
+
+def test_required_leaves_ammonia_template():
+    from catpath.config import SlabConfig
+    from catpath.network import build_network
+
+    net = build_network(SlabConfig(), kind="ammonia")
+    root = net.order()[0]
+    assert root == "NO"
+    all_edges = [(s.reactant.name, s.product.name) for s in net.steps] + list(net.links)
+
+    # target NH3: the O atom (from the N/O dissociation) parks off to its own
+    # H2O sink via the (N+O -> O+H) link -- both fragments must land.
+    leaves = ec.required_leaves(all_edges, net.links, root, "NH3")
+    assert leaves == {"NH3", "H2O"}
+
+
+def test_required_leaves_falls_back_to_target_on_ambiguous_branch():
+    # A parking link into a branch that FORKS into two dead ends (a genuine
+    # competing-reaction fork, not a single bookkeeping sink) is skipped.
+    edges = [("A", "B"), ("A", "X"), ("X", "Y1"), ("X", "Y2")]
+    parking_links = [("A", "B"), ("A", "X")]
+    leaves = ec.required_leaves(edges, parking_links, "A", "B")
+    assert leaves == {"B"}
+
+
+# --- span-vs-U over a DAG (worst-of-required-leaves, easiest route each) ---
+
+def test_span_dag_exceeds_target_span_when_the_parked_branch_is_worse():
+    # target path N -> N+H -> NH has a small chemical barrier (0.2); the
+    # parked branch N -> N+O -> OX has a much bigger one (0.9) -- both
+    # fragments must still get somewhere, so the DAG objective must see it.
+    node_energy0 = {"N": 0.0, "N+H": 0.1, "NH": 0.05, "N+O": 0.0, "OX": 0.0}
+    edge_barrier = {("N", "N+H"): 0.0, ("N", "N+O"): 0.0,
+                    ("N+H", "NH"): 0.2, ("N+O", "OX"): 0.9}
+    edges = [("N", "N+H"), ("N", "N+O"), ("N+H", "NH"), ("N+O", "OX")]
+    parking_links = [("N", "N+H"), ("N", "N+O")]
+
+    target_path = ec.reaction_path(edges, "N", "NH")
+    leaves = ec.required_leaves(edges, parking_links, "N", "NH")
+    assert leaves == {"NH", "OX"}
+    leaf_paths = {leaf: ec.enumerate_paths(edges, "N", leaf) for leaf in leaves}
+
+    span_target = ec.energetic_span_u(target_path, node_energy0, edge_barrier, "N", 0.0)
+    span_dag = ec.span_dag_u(leaf_paths, node_energy0, edge_barrier, "N", 0.0)
+    assert span_target == pytest.approx(0.3)
+    assert span_dag == pytest.approx(0.9)
+    assert span_dag > span_target
+
+
+def test_span_dag_takes_the_easier_of_two_routes_to_one_leaf():
+    # two routes A->AH@1->AHZ (barrier 0.5) and A->AH@2->AHZ (barrier 0.1)
+    # converge on the SAME leaf ("@..." is the existing site-isomer suffix,
+    # stripped by n_H parsing, so both intermediates carry n_H=1) -- the
+    # mechanism takes the easier (min) one, not the harder.
+    node_energy0 = {"A": 0.0, "AH@1": 0.0, "AH@2": 0.0, "AHZ": 0.0}
+    edge_barrier = {("A", "AH@1"): 0.0, ("A", "AH@2"): 0.0,
+                    ("AH@1", "AHZ"): 0.5, ("AH@2", "AHZ"): 0.1}
+    path1 = ["A", "AH@1", "AHZ"]
+    path2 = ["A", "AH@2", "AHZ"]
+
+    s1 = ec.energetic_span_u(path1, node_energy0, edge_barrier, "A", 0.0)
+    s2 = ec.energetic_span_u(path2, node_energy0, edge_barrier, "A", 0.0)
+    assert s1 == pytest.approx(0.5) and s2 == pytest.approx(0.1)
+
+    span_dag = ec.span_dag_u({"AHZ": [path1, path2]}, node_energy0, edge_barrier, "A", 0.0)
+    assert span_dag == pytest.approx(min(s1, s2))
+    assert span_dag < max(s1, s2)
+
+
+def test_optimal_span_dag_u_no_leaves_is_none():
+    assert ec.optimal_span_dag_u({}, {}, {}, "A") == (None, None)
+    assert ec.optimal_span_dag_u({"L": []}, {}, {}, "A") == (None, None)
+
+
+# --- P_side: guarded fork probabilities -------------------------------------
+
+def test_p_side_hand_computed_two_edge_fork():
+    kT = ec.K_B_EV * ec.T_STANDARD
+    forks = {"A": [
+        {"product": "B", "barrier": 0.20, "blocked": False},
+        {"product": "C", "barrier": 0.35, "blocked": False},
+    ]}
+    expected_p_main = math.exp(-0.20 / kT) / (math.exp(-0.20 / kT) + math.exp(-0.35 / kT))
+
+    assert ec.fork_branch_fraction(forks["A"], taken="B") == pytest.approx(expected_p_main)
+    assert ec.p_side(["A", "B"], forks) == pytest.approx(1.0 - expected_p_main)
+
+
+def test_p_side_ignores_states_with_fewer_than_two_competitors():
+    forks = {"A": [{"product": "B", "barrier": 0.2, "blocked": False}]}  # no real fork
+    assert ec.p_side(["A", "B"], forks) == pytest.approx(0.0)
+
+
+def test_p_side_none_when_a_competitor_barrier_missing():
+    forks = {"A": [
+        {"product": "B", "barrier": 0.2, "blocked": False},
+        {"product": "C", "barrier": None, "blocked": False},
+    ]}
+    assert ec.fork_branch_fraction(forks["A"], taken="B") is None
+    assert ec.p_side(["A", "B"], forks) is None
+
+
+def test_p_side_none_when_a_competitor_is_blocked():
+    forks = {"A": [
+        {"product": "B", "barrier": 0.2, "blocked": False},
+        {"product": "C", "barrier": 0.3, "blocked": True},  # low_confidence/wrong-site/etc.
+    ]}
+    assert ec.p_side(["A", "B"], forks) is None
+
+
 # --- RHE <-> SHE ---------------------------------------------------------
 
 def test_rhe_to_she_298K_is_minus_0p0592_per_pH():
@@ -230,8 +362,15 @@ def test_electrochemistry_integration_ammonia_template():
     assert che["U_opt"] is not None and math.isfinite(che["U_opt"])
     assert che["span_at_UL"] is not None and che["span_at_UL"] >= 0.0
     assert che["span_at_Uopt"] is not None and che["span_at_Uopt"] >= 0.0
-    # U_opt minimizes span by construction -> never worse than at U_L
+    # U_opt minimizes span_dag by construction -> never worse than at U_L
     assert che["span_at_Uopt"] <= che["span_at_UL"] + 1e-9
+
+    # target-path-only diagnostic figure, present alongside the DAG headline
+    assert che["span_target_at_Uopt"] is not None and che["span_target_at_Uopt"] >= 0.0
+    # every barrier here is the same constant (0.4 eV) with no low_confidence
+    # flags, so P_side is fully guarded -- a real number in [0, 1], not None.
+    assert che["P_side"] is not None and 0.0 <= che["P_side"] <= 1.0
+    assert che["T"] == pytest.approx(298.15)
 
 
 def test_electrochemistry_absent_config_is_a_no_op():

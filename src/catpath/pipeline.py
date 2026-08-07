@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -451,14 +452,48 @@ def run(cfg: Config, log=print) -> Results:
     return results
 
 
+def _fork_competitors(g, node: str, parking_set: set[tuple[str, str]], root: str) -> list[dict]:
+    """Every competing REACTION edge out of ``node`` (supply/parking edges
+    and PCETs excluded -- see :func:`electrochem.is_reaction_edge`), as the
+    ``{"product", "barrier", "blocked"}`` dicts :func:`electrochem.p_side`
+    wants. ``blocked`` folds in the edge's own ``low_confidence`` and the
+    product node's ``low_confidence`` (and any future ``wrong_site`` /
+    ``infeasible`` node flags) -- the guard never fabricates a ratio."""
+    out = []
+    for _, b, d in g.out_edges(node, data=True):
+        if not electrochem.is_reaction_edge(node, b, parking_set, root):
+            continue
+        barrier = d.get("barrier")
+        if barrier is not None and not math.isfinite(barrier):
+            barrier = None
+        blocked = bool(d.get("low_confidence")) or any(
+            bool(g.nodes[b].get(flag))
+            for flag in ("low_confidence", "wrong_site", "infeasible")
+        )
+        out.append({"product": b, "barrier": barrier, "blocked": blocked})
+    return out
+
+
 def _apply_electrochemistry(g, cfg: Config, results: Results, log=print) -> dict | None:
-    """CHE post-processing (docs/proposals/pathway-potential-lever.md, slice 1):
+    """CHE post-processing (docs/proposals/pathway-potential-lever.md):
     stamp ``n_H`` (relative to the root state -- see :func:`electrochem.n_H_rel`)
-    onto every node of ``g`` in place, and return the ``U_L``/``U_opt``/
-    ``span_at_UL``/``span_at_Uopt`` scalar bundle for the substrate->target
-    pathway. Pure post-processing over the energies already in ``g`` -- no new
+    onto every node of ``g`` in place, and return the results.json scalar
+    bundle. Pure post-processing over the energies already in ``g`` -- no new
     relax/NEB calls. ``None`` if there is no electrochemistry config, or no
-    root->target path to compute a pathway span/limiting-potential over.
+    root->target path to anchor the objective on.
+
+    The headline set (``U_L``, ``U_opt``, ``span_at_UL``, ``span_at_Uopt``)
+    carries **DAG semantics**: every root fragment must end SOMEWHERE (the
+    ammonia network's O atom parks off to water, not just N to NH3), so
+    ``U_L`` is taken over every electrochemical step reachable from root
+    (not just the target path), and the span objective is the worst
+    (max) over the *required* leaves (target + each parked branch's sink) of
+    the easiest (min) route to each -- see :func:`electrochem.required_leaves`
+    / :func:`electrochem.optimal_span_dag_u`. ``span_target_at_Uopt``
+    (target-path-only, evaluated at the DAG-optimal U) is a continuity/
+    diagnostic figure, not the headline. ``P_side`` (guarded fork
+    probabilities along the target path) is ``None`` ("insufficient data")
+    unless every competing barrier at every fork is computed and unflagged.
     """
     ec = cfg.electrochemistry
     if ec is None or not results.pathway:
@@ -471,22 +506,45 @@ def _apply_electrochemistry(g, cfg: Config, results: Results, log=print) -> dict
         data["n_H"] = electrochem.n_H_rel(n, root)
 
     edges = list(g.edges())
-    path = electrochem.reaction_path(edges, root, target)
-    if len(path) < 2:
+    target_path = electrochem.reaction_path(edges, root, target)
+    if len(target_path) < 2:
         log(f"electrochemistry: no root->target path ({root} -> {target}); "
-            "skipping U_L/span")
+            "skipping U_L/span/P_side")
         return None
 
     node_energy0 = {n: d["rel_energy"] for n, d in g.nodes(data=True)}
     edge_barrier = {(u, v): d.get("barrier", 0.0) for u, v, d in g.edges(data=True)}
-    path_edges = list(zip(path, path[1:]))
 
-    u_l = electrochem.limiting_potential(node_energy0, path_edges, root)
-    u_opt, span_opt = electrochem.optimal_span_u(
-        path, node_energy0, edge_barrier, root, window=ec.U_window)
-    span_ul = (electrochem.energetic_span_u(path, node_energy0, edge_barrier, root, u_l)
+    # U_L: full-DAG -- every electrochemical step reachable from root, not
+    # just the target path (both branches must proceed for turnover).
+    reachable = electrochem.reachable_from(edges, root)
+    reachable_edges = [(a, b) for a, b in edges if a in reachable]
+    u_l = electrochem.limiting_potential(node_energy0, reachable_edges, root)
+
+    # span: worst-of-required-leaves, easiest route to each.
+    leaves = electrochem.required_leaves(edges, results.links, root, target, log=log)
+    leaf_paths = {leaf: electrochem.enumerate_paths(edges, root, leaf, log=log)
+                  for leaf in leaves}
+    u_opt, span_opt = electrochem.optimal_span_dag_u(
+        leaf_paths, node_energy0, edge_barrier, root, window=ec.U_window, log=log)
+    span_ul = (electrochem.span_dag_u(leaf_paths, node_energy0, edge_barrier, root, u_l)
               if u_l is not None else None)
-    return {"U_L": u_l, "U_opt": u_opt, "span_at_UL": span_ul, "span_at_Uopt": span_opt}
+    span_target_opt = (
+        electrochem.energetic_span_u(target_path, node_energy0, edge_barrier, root, u_opt)
+        if u_opt is not None else None
+    )
+
+    # P_side: guarded fork probabilities along the target path only (the
+    # question is "does the mechanism stay on the target path", not the DAG).
+    parking_set = set(results.links)
+    forks = {a: _fork_competitors(g, a, parking_set, root) for a in target_path[:-1]}
+    forks = {a: c for a, c in forks.items() if len(c) >= 2}
+    p_side_val = electrochem.p_side(target_path, forks, t=ec.T)
+
+    return {
+        "U_L": u_l, "U_opt": u_opt, "span_at_UL": span_ul, "span_at_Uopt": span_opt,
+        "span_target_at_Uopt": span_target_opt, "P_side": p_side_val, "T": ec.T,
+    }
 
 
 def write_outputs(cfg: Config, results: Results, log=print) -> Path:
@@ -565,7 +623,8 @@ def write_outputs(cfg: Config, results: Results, log=print) -> Path:
         "warnings": results.warnings,
     }
     if che is not None:
-        summary.update(che)  # U_L, U_opt, span_at_UL, span_at_Uopt (additive)
+        # U_L, U_opt, span_at_UL, span_at_Uopt, span_target_at_Uopt, P_side, T
+        summary.update(che)
     (outdir / "results.json").write_text(json.dumps(summary, indent=2))
     log(f"wrote outputs to {outdir}")
     return outdir
