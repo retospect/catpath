@@ -100,3 +100,5 @@ priority-ordered within sections.
 ## Testing
 - [ ] Integration test for thumbnail/gallery rendering (EMT).
 - [ ] Golden-file checks for provenance caption / methods text.
+
+- `uv sync` / plain `uv run` fails on this checkout (precis-mcp>=8.21 lockfile resolution); everything works with `--frozen`. Fix the lock or drop the dep pin — flagged repeatedly by CI-style runs 2026-08-07.
