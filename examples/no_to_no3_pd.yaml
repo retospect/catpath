@@ -1,25 +1,60 @@
 # First target: NO -> NO3 oxidation on Pd(111).
 # Dev/demo uses the EMT backend (fast, qualitative). Switch mlip.backend to
 # "mace" or "fairchem" on the GB10 GPU for production accuracy.
+#
+# CASE SENSITIVITY (see examples/README.md "Notes"): element symbols, the
+# substrate/target/reagent formulas, and the network name are ALL case-sensitive
+# ("Pd" not "pd", "NH3" not "nh3", "oxidation" not "Oxidation"). Only mlip.backend
+# is case-insensitive.
 name: no_to_no3_pd
-substrate: "NO"    # quote! bare NO is YAML boolean false
+substrate: "NO"    # quote it: chemical labels are safest quoted (autocatpath's loader
+                   # also un-coerces bare NO/ON/OFF, but plain YAML reads them as bools)
 target: "NO3"
 network: oxidation # linear NO -> NO2 -> NO3 (use `branching` for the DAG, `auto` to autodetect)
 
 slab:
+  # This block BUILDS a clean fcc(111) surface from the element + size below.
+  # To score a PRE-BUILT slab instead (alloy, adatom, stepped facet, custom
+  # constraints), pass it through the programmatic API (the precis `structure`
+  # seam: run_pathway(..., slab_extxyz=...)) as an ASE-readable geometry. The
+  # wire format is extxyz — lossless for cell, pbc, positions, and constraints.
+  # There is no YAML field for a slab file yet; the `slab:` block is the only
+  # config-driven path, and it always builds fcc(111).
   element: Pd
   size: [3, 3, 4]     # 3x3 surface cell, 4 layers
   vacuum: 10.0
   fix_layers: 2       # freeze bottom 2 layers
 
 mlip:
-  backend: emt        # emt | mace | chgnet | fairchem | grace | auto
-  device: cpu
+  # backend alternatives:
+  #   emt      dependency-free ASE potential; FAST but only these elements:
+  #            Ag Al Au C Cu H N Ni O Pd Pt. Great for dev/CI, qualitative only.
+  #   mace     MACE-MP-0 universal ML potential (GPU); near-DFT. Pick a foundation
+  #            model size via `model: small|medium|large`.
+  #   chgnet   CHGNet, CPU-friendly ML potential.
+  #   fairchem Meta FAIRChem / UMA (adsorbates on metals); set `task:` for a
+  #            non-default head (defaults to "oc20").
+  #   grace    GRACE foundation models (TensorFlow).
+  #   auto     pick the best ML backend actually installed.
+  # The ML backends have conflicting deps -> install exactly ONE per environment
+  # (pip install "autocatpath[mace]" etc.), or use `auto`.
+  backend: emt        # emt | mace | chgnet | fairchem | grace | auto (case-insensitive)
+  # model: medium     # backend-specific checkpoint (mace: small|medium|large)
+  # models: []        # multi-model pooling: list of "model" or "backend:model",
+  #                   # e.g. ["small", "medium"] or ["mace:medium", "chgnet"]
+  device: cpu         # cpu | cuda (used only by the torch backends: mace/chgnet/fairchem)
 
 search:
   neb_images: 5
   fmax: 0.05
   max_steps: 200
+  # seeds: each seed rattles the ADSORBATE atoms (Gaussian, 0.15 A; the slab
+  # stays frozen) into a different starting pose, relaxes it, then results are
+  # pooled into a mean +/- spread per level and barrier. This probes how robust
+  # each local minimum is: agreement across seeds -> tight error bar; scatter ->
+  # flagged low-confidence. Each seed is deterministic (seeded RNG), so a run
+  # reproduces exactly. Use >=3 for a meaningful spread; a single seed gives a
+  # point estimate with no uncertainty.
   seeds: [0, 1, 2]    # >=3 seeds for a mean +/- spread
   rmsd_thresh: 0.7
   energy_thresh: 0.05

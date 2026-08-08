@@ -14,11 +14,11 @@ matching the style of ``test_bind_preflight.py``.
 
 from types import SimpleNamespace
 
-from catpath import pipeline
-from catpath.config import Config, SlabConfig
-from catpath.network import Network, StateSpec, StepSpec
-from catpath.relax import RelaxResult
-from catpath.structures import build_slab, place_fragments
+from autocatpath import pipeline
+from autocatpath.config import Config, SlabConfig
+from autocatpath.network import Network, StateSpec, StepSpec
+from autocatpath.relax import RelaxResult
+from autocatpath.structures import build_slab, place_fragments
 
 
 def tiny_cfg(tmp_path):
@@ -147,9 +147,10 @@ def test_run_one_seed_retries_once_with_doubled_steps_and_uses_converged_result(
 
     calls = []
 
-    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries):
+    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries, **kw):
         calls.append({"max_steps": max_steps, "n_images": n_images,
-                      "fmax": fmax, "retries": retries})
+                      "fmax": fmax, "retries": retries,
+                      "n_slab": kw.get("n_slab"), "tether": kw.get("tether")})
         converged = len(calls) == 2  # first attempt fails, retry converges
         return SimpleNamespace(barrier=2.0 if converged else 9.0,
                                delta_e=0.3, converged=converged, images=[])
@@ -165,6 +166,10 @@ def test_run_one_seed_retries_once_with_doubled_steps_and_uses_converged_result(
     assert calls[1]["n_images"] == calls[0]["n_images"]            # band unchanged
     assert calls[1]["fmax"] == calls[0]["fmax"]                    # fmax unchanged
     assert calls[1]["retries"] == 0               # the retry itself doesn't chain-retry
+    # the retry inherits the dissolving-tether band settle -- an untethered retry
+    # would reintroduce the mid-band desorption the tether exists to prevent
+    assert calls[1]["n_slab"] == calls[0]["n_slab"] is not None
+    assert calls[1]["tether"] == calls[0]["tether"] is not None
 
     assert entry["barrier"] == 2.0                # uses the retry's (converged) result
     assert not entry.get("low_confidence")         # info-level, not low_confidence
@@ -179,7 +184,7 @@ def test_run_one_seed_keeps_existing_flagging_when_retry_still_fails(tmp_path, m
 
     calls = []
 
-    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries):
+    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries, **kw):
         calls.append(max_steps)
         return SimpleNamespace(barrier=3.0, delta_e=0.1, converged=False, images=[])
 
@@ -204,7 +209,7 @@ def test_run_one_seed_auto_retry_opt_out(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries):
+    def fake_neb(reactant, product, make_calc, n_images, fmax, max_steps, retries, **kw):
         calls.append(max_steps)
         return SimpleNamespace(barrier=3.0, delta_e=0.1, converged=False, images=[])
 

@@ -1,21 +1,32 @@
 # NO reduction to ammonia (NO -> NH3) on Pd(111).
 # Dev/demo uses EMT (fast, qualitative). Switch mlip.backend to "mace" for a real
 # ML potential (near-DFT accuracy) on the GB10 GPU.
+#
+# CASE SENSITIVITY: element, substrate/target/reagents (chemical formulas), and
+# `network` are case-sensitive; mlip.backend is not. See examples/README.md "Notes".
 name: no_to_nh3_pd
-substrate: "NO"      # quote! bare NO is YAML boolean false
+substrate: "NO"      # quote it: chemical labels are safest quoted (bare NO reads as a bool in plain YAML)
 target: "NH3"
 network: ammonia     # ammonia | branching | oxidation
 
 slab:
+  # Builds a clean fcc(111) surface from element + size. A pre-built slab (alloy,
+  # adatom, other facet, custom constraints) is supplied instead via the
+  # programmatic/precis `structure` seam as extxyz — see no_to_no3_pd.yaml and
+  # examples/README.md "Notes". No YAML field for a slab file yet.
   element: Pd
   size: [3, 3, 4]
   vacuum: 10.0
   fix_layers: 2
 
 mlip:
+  # emt | mace | chgnet | fairchem | grace | auto (case-insensitive).
+  #   emt: dep-free, limited elements (Ag Al Au C Cu H N Ni O Pd Pt), dev/CI only.
+  #   mace/chgnet/fairchem/grace: ML potentials, install ONE per env (conflicting
+  #   deps); `auto` picks whichever is installed. Full list in no_to_no3_pd.yaml.
   backend: emt        # emt | mace | fairchem
   model: medium       # mace foundation model size (small|medium|large)
-  device: cuda        # used only by mace/fairchem
+  device: cuda        # cpu | cuda — used only by the torch backends (mace/chgnet/fairchem)
 
 search:
   neb_images: 7        # more images -> smoother band, better TS location
@@ -23,6 +34,9 @@ search:
   max_steps: 200
   neb_fmax: 0.1
   neb_max_steps: 150   # allow the harder hydrogenation steps to converge
+  # seeds: one relaxation per seed, each from a different rattled adsorbate pose
+  # (slab frozen); pooled into a mean +/- spread that measures how robust each
+  # minimum/barrier is. Deterministic per seed (reproducible). >=3 for a spread.
   seeds: [0, 1, 2]
   rmsd_thresh: 0.7
   energy_thresh: 0.05

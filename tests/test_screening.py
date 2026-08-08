@@ -16,11 +16,11 @@ import math
 
 import pytest
 
-from catpath import pipeline
-from catpath.config import Config, ElectrochemistryConfig, SlabConfig
-from catpath.network import Network, StateSpec, StepSpec
-from catpath.relax import RelaxResult
-from catpath.validate import GeometryReport
+from autocatpath import pipeline
+from autocatpath.config import Config, ElectrochemistryConfig, SlabConfig
+from autocatpath.network import Network, StateSpec, StepSpec
+from autocatpath.relax import RelaxResult
+from autocatpath.validate import GeometryReport
 
 
 def tiny_cfg(tmp_path, screening=True):
@@ -55,7 +55,7 @@ def test_run_one_seed_screening_skips_neb_no_barrier_key(tmp_path, monkeypatch):
     def fake_bound(state, slab_, n_slab_, cfg_, seed):
         atoms = state.build(slab_)
         energy = 0.0 if state.name == "R" else -0.4
-        return _dummy_result(atoms, energy), ok_geo, True
+        return _dummy_result(atoms, energy), ok_geo, True, None
 
     monkeypatch.setattr(pipeline, "_relax_state_bound", fake_bound)
 
@@ -82,8 +82,8 @@ def test_run_one_seed_screening_unbound_endpoint_no_barrier_key(tmp_path, monkey
     def fake_bound(state, slab_, n_slab_, cfg_, seed):
         atoms = state.build(slab_)
         if state.name == "P":  # product never binds -- same bind-preflight gate as usual
-            return _dummy_result(atoms, 0.0), bad_geo, False
-        return _dummy_result(atoms, 0.0), ok_geo, True
+            return _dummy_result(atoms, 0.0), bad_geo, False, None
+        return _dummy_result(atoms, 0.0), ok_geo, True, None
 
     monkeypatch.setattr(pipeline, "_relax_state_bound", fake_bound)
 
@@ -113,8 +113,8 @@ def test_screening_off_reproduces_default_run_one_seed_shape(tmp_path, monkeypat
     def fake_bound(state, slab_, n_slab_, cfg_, seed):
         atoms = state.build(slab_)
         if state.name == "P":
-            return _dummy_result(atoms, 0.0), bad_geo, False
-        return _dummy_result(atoms, 0.0), ok_geo, True
+            return _dummy_result(atoms, 0.0), bad_geo, False, None
+        return _dummy_result(atoms, 0.0), ok_geo, True, None
 
     monkeypatch.setattr(pipeline, "_relax_state_bound", fake_bound)
     part = pipeline.run_one_seed(cfg, seed=0, log=lambda *a, **k: None)
@@ -177,11 +177,11 @@ def test_electrochemistry_screening_thermodynamic_span_and_p_side_none():
     but with SCREENING-shaped edges: no "barrier" key anywhere. U_L/U_opt/span
     still compute (purely thermodynamic); P_side is None -- no competing
     barrier was ever computed, so the guard reports "insufficient data"."""
-    from catpath import electrochem as ec
-    from catpath.graph import build_graph
-    from catpath.network import build_network
-    from catpath.pipeline import Results, _apply_electrochemistry
-    from catpath.uncertainty import Estimate
+    from autocatpath import electrochem as ec
+    from autocatpath.graph import build_graph
+    from autocatpath.network import build_network
+    from autocatpath.pipeline import Results, _apply_electrochemistry
+    from autocatpath.uncertainty import Estimate
 
     net = build_network(SlabConfig(), kind="ammonia")
     root = net.order()[0]
@@ -233,7 +233,7 @@ def test_electrochemistry_screening_thermodynamic_span_and_p_side_none():
     assert che["P_side"] is None
 
 
-# --- precis bridge: the scalar summary path (analysis.rate_limiting) -------
+# --- end-to-end: screening survives a full YAML-driven run ------------------
 
 SCREEN_YAML = """
 name: screening_smoke
@@ -246,31 +246,30 @@ search: {seeds: [0], screening: true, max_steps: 40, pose_count: 2}
 """
 
 
-def test_runner_screening_mode_no_barrier_scalar():
-    from catpath.precis import analysis, runner
+def test_full_run_screening_mode_carries_no_barrier(tmp_path):
+    """The barriers-absent invariant end-to-end, from YAML through the written
+    artifacts -- not just at the `run_one_seed` entry the unit tests above poke."""
+    import json
 
-    art = runner.run_pathway_from_yaml(SCREEN_YAML)
-    r = art["results_json"]
-    assert r.get("screening") is True
-    assert r["edges"], "network produced no steps"
-    for e in r["edges"]:
+    from autocatpath.config import _load_yaml
+
+    data = _load_yaml(SCREEN_YAML)
+    data["outdir"] = str(tmp_path)
+    cfg = Config.from_dict(data)
+
+    results = pipeline.run(cfg, log=lambda *a, **k: None)
+    outdir = pipeline.write_outputs(cfg, results, log=lambda *a, **k: None)
+
+    assert results.edges, "network produced no steps"
+    for e in results.edges:
         assert "barrier" not in e
         assert "delta_e" in e
 
-    g = art["graph_json"]
+    r = json.loads((outdir / "results.json").read_text())
+    assert r.get("screening") is True
+
+    g = json.loads((outdir / "graph.json").read_text())
     reaction_links = [e for e in g["links"] if e.get("kind") != "supply"]
     assert reaction_links
     for e in reaction_links:
         assert "barrier" not in e
-
-    root, target = analysis.roots(g, r)
-    rl = analysis.rate_limiting(g, root, target)
-    assert rl is not None and rl["ea"] is None  # no barrier scalar to rank on
-
-    summ = analysis.summarize(g, root, target)
-    assert summ["rate_limiting"]["ea"] is None
-    # `oxidation`'s root->target isn't connected (see test_precis_bridge.py's
-    # BRANCH-vs-SMOKE note), so span may be None here; when present it's a
-    # thermodynamic-only figure (missing barriers fold to 0.0 -- see
-    # analysis.energetic_span / build_graph).
-    assert summ["span"] is None or summ["span"] >= 0.0

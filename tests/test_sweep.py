@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from catpath.config import Config, SlabConfig
-from catpath.sweep import run_sweep, write_sweep
+from autocatpath.config import Config, SlabConfig
+from autocatpath.sweep import run_sweep, write_sweep
 
 
 def tiny(tmp_path):

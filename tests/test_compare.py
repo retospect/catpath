@@ -5,9 +5,9 @@ import json
 
 from pytest import approx
 
-from catpath import pipeline
-from catpath.config import Config, MLIPConfig, SlabConfig
-from catpath.viz import (
+from autocatpath import pipeline
+from autocatpath.config import Config, MLIPConfig, SlabConfig
+from autocatpath.viz import (
     _anchor_shift, _assign_columns, _ordered_names, compare_barriers, compare_boxplot,
 )
 

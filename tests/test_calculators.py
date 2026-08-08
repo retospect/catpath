@@ -6,8 +6,8 @@ the heavy ML stacks; only EMT is actually constructed.
 
 import pytest
 
-from catpath import calculators as C
-from catpath.config import MLIPConfig
+from autocatpath import calculators as C
+from autocatpath.config import MLIPConfig
 
 
 def _only(installed: set[str], monkeypatch):
@@ -33,7 +33,7 @@ def test_auto_errors_when_no_ml_installed(monkeypatch):
     with pytest.raises(RuntimeError) as e:
         C.resolve_backend("auto")
     assert "no ML potential installed" in str(e.value)
-    assert "catpath[mace]" in str(e.value)         # actionable install hint
+    assert "autocatpath[mace]" in str(e.value)         # actionable install hint
 
 
 def test_available_backends_shape():
@@ -59,7 +59,7 @@ def test_uninstalled_backend_gives_actionable_error():
     # chgnet isn't installed in this env -> friendly RuntimeError, not ImportError
     with pytest.raises(RuntimeError) as e:
         C.make_calculator(MLIPConfig(backend="chgnet"))
-    assert "catpath[chgnet]" in str(e.value)
+    assert "autocatpath[chgnet]" in str(e.value)
 
 
 def test_ml_calculator_is_memoized(monkeypatch):

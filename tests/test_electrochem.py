@@ -1,4 +1,4 @@
-"""Tests for the CHE post-processing lever (catpath.electrochem).
+"""Tests for the CHE post-processing lever (autocatpath.electrochem).
 
 See docs/proposals/pathway-potential-lever.md (slice 1, precis-mcp repo) for
 the design of record. No relax/NEB calls here -- everything is arithmetic
@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from catpath import electrochem as ec
+from autocatpath import electrochem as ec
 
 
 # --- n_H parsing ------------------------------------------------------------
@@ -178,8 +178,8 @@ def test_optimal_span_u_finds_crossings_between_disjoint_difference_terms():
 # --- required leaves (root fragments must all end somewhere) ---------------
 
 def test_required_leaves_ammonia_template():
-    from catpath.config import SlabConfig
-    from catpath.network import build_network
+    from autocatpath.config import SlabConfig
+    from autocatpath.network import build_network
 
     net = build_network(SlabConfig(), kind="ammonia")
     root = net.order()[0]
@@ -313,11 +313,11 @@ def test_decoupled_ph_shift_is_dormant_safe():
 # --- integration: ammonia template network, synthetic energies -----------
 
 def test_electrochemistry_integration_ammonia_template():
-    from catpath.config import Config, ElectrochemistryConfig, SlabConfig
-    from catpath.graph import build_graph
-    from catpath.network import build_network
-    from catpath.pipeline import Results, _apply_electrochemistry
-    from catpath.uncertainty import Estimate
+    from autocatpath.config import Config, ElectrochemistryConfig, SlabConfig
+    from autocatpath.graph import build_graph
+    from autocatpath.network import build_network
+    from autocatpath.pipeline import Results, _apply_electrochemistry
+    from autocatpath.uncertainty import Estimate
 
     net = build_network(SlabConfig(), kind="ammonia")
     root = net.order()[0]
@@ -374,11 +374,11 @@ def test_electrochemistry_integration_ammonia_template():
 
 
 def test_electrochemistry_absent_config_is_a_no_op():
-    from catpath.config import Config, SlabConfig
-    from catpath.graph import build_graph
-    from catpath.network import build_network
-    from catpath.pipeline import Results, _apply_electrochemistry
-    from catpath.uncertainty import Estimate
+    from autocatpath.config import Config, SlabConfig
+    from autocatpath.graph import build_graph
+    from autocatpath.network import build_network
+    from autocatpath.pipeline import Results, _apply_electrochemistry
+    from autocatpath.uncertainty import Estimate
 
     net = build_network(SlabConfig(), kind="oxidation")
     node_energies = {name: Estimate(mean=0.0, std=0.0, n=1, values=[])

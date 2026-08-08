@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from catpath.config import Config
+from autocatpath.config import Config
 
 
 def test_defaults():

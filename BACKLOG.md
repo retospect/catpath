@@ -1,4 +1,4 @@
-# catpath — backlog / TODO
+# autocatpath — backlog / TODO
 
 Running list of deferred work so we don't forget. Newest asks captured; roughly
 priority-ordered within sections.
@@ -13,11 +13,11 @@ priority-ordered within sections.
   branches reachable with the allowed adatoms (reagent per supply link derived
   from stoichiometry). `[]` = dissociation only; omit = full template. CLI:
   `--reagents H,O`. Tests in `test_network.py`.
-- [x] **(c) Multi-substrate networks** — `catpath multi` runs several
+- [x] **(c) Multi-substrate networks** — `autocatpath multi` runs several
   `(substrate, target, network, reagents)` specs from `substrates:` and stacks
   them into one union-column energy map (NaN where a state is absent). See
   `multi.py`, `examples/multi_substrate.yaml`, `test_multi.py`.
-- [x] **(b) Intermediate autodetection** — `network: auto` (`src/catpath/explore.py`).
+- [x] **(b) Intermediate autodetection** — `network: auto` (`src/autocatpath/explore.py`).
   Rule-guided explorer over a molecular graph of the adsorbate: dissociate a
   heavy–heavy bond, supply a reagent adatom, bond it. Prunes by valence + atom
   budget + reachability to the target. Provably acyclic; step endpoints share an
@@ -26,8 +26,8 @@ priority-ordered within sections.
   `examples/auto_ammonia.yaml`, `tests/test_explore.py`. STILL OPEN below.
 
 ## Packaging & release ("ready for GitHub")
-- [x] **Name chosen: `catpath`** (PyPI-available; package renamed atosim→catpath).
-- [x] **pip installable** — `pip install catpath` (+ `[mace]`/`[chgnet]`/
+- [x] **Name chosen: `autocatpath`** (PyPI-available; package renamed atosim→autocatpath).
+- [x] **pip installable** — `pip install autocatpath` (+ `[mace]`/`[chgnet]`/
   `[fairchem]`/`[grace]` extras). `uv build` → wheel+sdist verified; clean-venv
   install runs the full pipeline end-to-end. GPL-3.0-or-later license + bundled
   LICENSE. README has install/quickstart/CLI + `examples/README.md` how-to.
@@ -100,5 +100,3 @@ priority-ordered within sections.
 ## Testing
 - [ ] Integration test for thumbnail/gallery rendering (EMT).
 - [ ] Golden-file checks for provenance caption / methods text.
-
-- `uv sync` / plain `uv run` fails on this checkout (precis-mcp>=8.21 lockfile resolution); everything works with `--frozen`. Fix the lock or drop the dep pin — flagged repeatedly by CI-style runs 2026-08-07.

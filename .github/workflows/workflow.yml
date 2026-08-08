@@ -1,7 +1,15 @@
-# Publish catpath to PyPI via Trusted Publishing (OIDC) — no API token needed.
+# Publish autocatpath (and its catpath compat alias) to PyPI via Trusted
+# Publishing (OIDC) — no API token needed.
 #
-# This file's NAME (workflow.yml), the repo (retospect/catpath) and the
-# environment (pypi) must match the PyPI trusted-publisher configuration.
+# `autocatpath` is the canonical project name. We ALSO ship the same code under
+# the legacy `catpath` name so existing `pip install catpath` users keep
+# resolving to this package after the rename. Both are separate PyPI projects
+# but share ONE trusted-publisher shape: repo retospect/catpath, this file
+# (workflow.yml), environment `pypi`. Configure a trusted publisher with those
+# values on BOTH the `autocatpath` and `catpath` PyPI projects. A single publish
+# step uploads both distributions — PyPI matches each file to its own project by
+# name.
+#
 # Trigger: publishing a GitHub Release.  Also runnable manually.
 #
 # One-time GitHub setup: create an Environment named `pypi`
@@ -19,8 +27,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: Build sdist + wheel
+      - name: Build autocatpath sdist + wheel
         run: uv build
+      - name: Build catpath compat-alias sdist + wheel
+        # Same tree, PyPI project name overridden back to the legacy catpath
+        # name so old installs keep working. Both name variants land in dist/.
+        run: |
+          sed -i 's/^name = "autocatpath"$/name = "catpath"/' pyproject.toml
+          uv build
       - uses: actions/upload-artifact@v4
         with:
           name: dist

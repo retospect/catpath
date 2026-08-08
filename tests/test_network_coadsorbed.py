@@ -1,7 +1,7 @@
 """The ``coadsorbed`` ammonia template: the verify tier that removes the
 fragment-parking approximation -- after dissociation (``NO -> N+O``), both N*
 and O* stay in-cell together until a product (H2O or NH3) actually desorbs.
-See :func:`catpath.network.build_coadsorbed_ammonia_network`.
+See :func:`autocatpath.network.build_coadsorbed_ammonia_network`.
 """
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ import math
 
 import pytest
 
-from catpath import electrochem as ec
-from catpath.config import Config, SlabConfig
-from catpath.network import (
+from autocatpath import electrochem as ec
+from autocatpath.config import Config, SlabConfig
+from autocatpath.network import (
     build_ammonia_network,
     build_coadsorbed_ammonia_network,
     build_network,
@@ -221,7 +221,7 @@ def _tiny_coadsorbed_cfg(tmp_path):
 def test_pipeline_coadsorbed_end_to_end_and_template_stamped(tmp_path):
     import json
 
-    from catpath import pipeline
+    from autocatpath import pipeline
 
     cfg = _tiny_coadsorbed_cfg(tmp_path)
     res = pipeline.run(cfg, log=lambda *a, **k: None)
@@ -243,7 +243,7 @@ def test_pipeline_parked_default_template_stamped(tmp_path):
     stamps itself into results.json."""
     import json
 
-    from catpath import pipeline
+    from autocatpath import pipeline
 
     cfg = _tiny_coadsorbed_cfg(tmp_path)
     cfg.template = "parked"
@@ -255,7 +255,7 @@ def test_pipeline_parked_default_template_stamped(tmp_path):
     assert len(summary["nodes"]) == 16
 
 
-# --- precis bridge: the pure runner also stamps "template" -------------------
+# --- end-to-end: a full run stamps "template" into results.json --------------
 
 COADSORBED_YAML = """
 name: coadsorbed_bridge_smoke
@@ -269,12 +269,21 @@ search: {seeds: [0], screening: true, max_steps: 20, pose_count: 2}
 """
 
 
-def test_runner_stamps_template_coadsorbed():
-    from catpath.precis import runner
+def test_full_run_stamps_template_coadsorbed(tmp_path):
+    import json
 
-    art = runner.run_pathway_from_yaml(COADSORBED_YAML)
-    r = art["results_json"]
+    from autocatpath import pipeline
+    from autocatpath.config import _load_yaml
+
+    data = _load_yaml(COADSORBED_YAML)
+    data["outdir"] = str(tmp_path)
+    cfg = Config.from_dict(data)
+    assert cfg.template == "coadsorbed"
+
+    results = pipeline.run(cfg, log=lambda *a, **k: None)
+    outdir = pipeline.write_outputs(cfg, results, log=lambda *a, **k: None)
+
+    r = json.loads((outdir / "results.json").read_text())
     assert r["template"] == "coadsorbed"
     assert len(r["nodes"]) == 34
-    assert art["config"]["template"] == "coadsorbed"
 

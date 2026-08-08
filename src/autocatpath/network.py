@@ -59,6 +59,14 @@ class StateSpec:
             c[s["symbol"]] += 1
         return c
 
+    def placement_heights(self) -> list[float]:
+        """Intended height above the surface per adsorbate atom, in build order
+        (adsorbate atom ``n_slab + i`` <-> ``specs[i]``). The atom placed LOWEST
+        in each fragment is the one seated at a site — the ``*`` binding atom the
+        formula designates. Consumed by ``validate.binding_site_ok`` to check the
+        relaxed geometry actually binds through that atom, not a flipped one."""
+        return [float(s.get("height", 0.0)) for s in self.specs]
+
 
 @dataclass
 class StepSpec:
@@ -669,7 +677,7 @@ def build_network(slab_cfg: SlabConfig, kind: str = "ammonia",
     """Build a reaction network.
 
     ``kind="auto"`` autodetects the intermediates from ``substrate`` -> ``target``
-    (rule-guided; see :mod:`catpath.explore`), bounded by ``max_extra`` (reagent
+    (rule-guided; see :mod:`autocatpath.explore`), bounded by ``max_extra`` (reagent
     atom budget) and ``max_states``; the curated template kinds ignore
     ``substrate``/``target``/``max_*`` and are filtered by ``reagents`` as before.
 

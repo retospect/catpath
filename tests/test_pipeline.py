@@ -2,12 +2,12 @@
 
 import numpy as np
 
-from catpath.config import Config
-from catpath.neb import linear_barrier
-from catpath.calculators import make_calculator
-from catpath.config import MLIPConfig, SlabConfig
-from catpath.structures import build_slab, place_fragments
-from catpath import pipeline
+from autocatpath.config import Config
+from autocatpath.neb import linear_barrier
+from autocatpath.calculators import make_calculator
+from autocatpath.config import MLIPConfig, SlabConfig
+from autocatpath.structures import build_slab, place_fragments
+from autocatpath import pipeline
 
 
 def tiny_cfg(tmp_path):

@@ -12,3 +12,6 @@ runs/
 build/
 dist/
 .venv-*/
+
+# Claude Code: keep personal/local overrides out of the repo
+.claude/settings.local.json
